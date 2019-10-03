@@ -6,8 +6,6 @@
 #include "cmLocalCommonGenerator.h"
 #include "cmRulePlaceholderExpander.h"
 
-#include <cm_auto_ptr.hxx>
-
 class cmSourceFile;
 class cmSourceGroup;
 class cmCustomCommand;
@@ -27,7 +25,7 @@ public:
 
   virtual void Generate();
 
-  cmRulePlaceholderExpander* CreateRulePlaceholderExpander() const CM_OVERRIDE;
+  cmRulePlaceholderExpander* CreateRulePlaceholderExpander() const override;
 
   virtual void ComputeObjectFilenames(
     std::map<cmSourceFile const*, std::string>& mapping,

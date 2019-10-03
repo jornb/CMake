@@ -15,6 +15,7 @@
 #include "cmGlobalGenerator.h"
 #include "cmMakefile.h"
 #include "cmState.h"
+#include "cmake.h"
 #include "cmSourceFile.h"
 #include "cmSystemTools.h"
 
@@ -31,12 +32,15 @@ cmLocalFastbuildGenerator::cmLocalFastbuildGenerator(cmGlobalGenerator* gg,
   // this->LinkScriptShell = true;
 }
 
-cmRulePlaceholderExpander* cmLocalFastbuildGenerator::CreateRulePlaceholderExpander() const
+cmRulePlaceholderExpander*
+cmLocalFastbuildGenerator::CreateRulePlaceholderExpander() const
 {
-    cmRulePlaceholderExpander* ret = new cmRulePlaceholderExpander(
-      this->Compilers, this->VariableMappings, this->CompilerSysroot);
-    ret->SetTargetImpLib(FASTBUILD_DOLLAR_TAG "TargetOutputImplib" FASTBUILD_DOLLAR_TAG);
-    return ret;
+  cmRulePlaceholderExpander* ret =
+    new cmRulePlaceholderExpander(this->Compilers, this->VariableMappings,
+                                  this->CompilerSysroot, this->LinkerSysroot);
+  ret->SetTargetImpLib(FASTBUILD_DOLLAR_TAG
+                       "TargetOutputImplib" FASTBUILD_DOLLAR_TAG);
+  return ret;
 }
 
 //----------------------------------------------------------------------------
@@ -72,7 +76,7 @@ void cmLocalFastbuildGenerator::ComputeObjectFilenames(
 std::string cmLocalFastbuildGenerator::GetTargetDirectory(
   const cmGeneratorTarget* target) const
 {
-  std::string dir = cmake::GetCMakeFilesDirectoryPostSlash();
+  std::string dir = "CMakeFiles/";
   dir += target->GetName();
 #if defined(__VMS)
   dir += "_dir";

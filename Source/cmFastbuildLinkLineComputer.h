@@ -21,8 +21,7 @@ public:
                               cmStateDirectory stateDir,
                               const cmGlobalFastbuildGenerator *gg);
 
-  virtual std::string ConvertToLinkReference(std::string const& input) const
-    CM_OVERRIDE;
+  virtual std::string ConvertToLinkReference(std::string const& input) const override;
 
 private:
   cmGlobalFastbuildGenerator const* GG;

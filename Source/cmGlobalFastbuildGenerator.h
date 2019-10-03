@@ -8,6 +8,7 @@
 #include "cmGlobalGenerator.h"
 #include "cmLocalCommonGenerator.h"
 #include "cmLocalFastbuildGenerator.h"
+#include "cmDocumentationEntry.h"
 
 class cmGlobalGeneratorFactory;
 class cmCustomCommandGenerator;
@@ -64,7 +65,7 @@ public:
 
   cmLinkLineComputer* CreateLinkLineComputer(
     cmOutputConverter* outputConverter,
-    cmStateDirectory stateDir) const CM_OVERRIDE;
+    cmStateDirectory const& stateDir) const override;
 
   std::string ConvertToFastbuildPath(const std::string& path) const;
 

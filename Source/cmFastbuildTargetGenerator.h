@@ -86,7 +86,7 @@ private:
                                       std::string& options);
 
   static void EnsureDirectoryExists(const std::string& path,
-                                    const char* homeOutputDirectory);
+                                    const std::string& homeOutputDirectory);
 
   static std::string GetLastFolderName(const std::string& string);
 

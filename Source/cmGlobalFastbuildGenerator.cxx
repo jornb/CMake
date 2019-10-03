@@ -135,6 +135,7 @@ missing file: protobuffer.p
 #include "cmSourceFile.h"
 #include "cmState.h"
 #include "cmTarget.h"
+#include "cmake.h"
 #include <assert.h>
 #include <cmsys/Encoding.hxx>
 
@@ -299,7 +300,7 @@ void cmGlobalFastbuildGenerator::Detail::Detection::DetectCompilerFlags(
   const cmGeneratorTarget* gt, const cmSourceFile* source,
   const std::string& language, const std::string& configName)
 {
-  lg->AddLanguageFlags(compileFlags, language, configName);
+  lg->AddLanguageFlags(compileFlags, gt, language, configName);
 
   lg->AddArchitectureFlags(compileFlags, gt, language, configName);
 
@@ -445,7 +446,7 @@ bool cmGlobalFastbuildGenerator::Detail::Detection::RemovalTest::operator()(
     // (i.e. top-level) directory.  CMake creates copies of these targets
     // in every directory, which we don't need.
     cmMakefile* mf = target->Target->GetMakefile();
-    if (strcmp(mf->GetCurrentSourceDirectory(), mf->GetHomeDirectory()) != 0) {
+    if (mf->GetCurrentSourceDirectory() != mf->GetHomeDirectory()) {
       return true;
     }
   }
@@ -1094,7 +1095,7 @@ std::string cmGlobalFastbuildGenerator::ConvertToFastbuildPath(
 {
   cmLocalFastbuildGenerator* ng =
     static_cast<cmLocalFastbuildGenerator*>(this->LocalGenerators[0]);
-  std::string convPath = ng->ConvertToRelativePath(
+  std::string convPath = ng->MaybeConvertToRelativePath(
     this->LocalGenerators[0]->GetState()->GetBinaryDirectory(), path);
 #ifdef _WIN32
   std::replace(convPath.begin(), convPath.end(), '/', '\\');
@@ -1103,7 +1104,7 @@ std::string cmGlobalFastbuildGenerator::ConvertToFastbuildPath(
 }
 
 cmLinkLineComputer* cmGlobalFastbuildGenerator::CreateLinkLineComputer(
-  cmOutputConverter* outputConverter, cmStateDirectory stateDir) const
+  cmOutputConverter* outputConverter, cmStateDirectory const& stateDir) const
 {
   return new cmFastBuildLinkLineComputer(
     outputConverter,

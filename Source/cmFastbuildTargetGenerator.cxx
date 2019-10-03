@@ -15,7 +15,7 @@ cmGlobalFastbuildGenerator::Detail::Generation::CustomCommandAliasMap
 
 cmFastbuildTargetGenerator::cmFastbuildTargetGenerator(cmGeneratorTarget* gt)
   : cmCommonTargetGenerator(gt)
-  , m_fileContext(((cmGlobalFastbuildGenerator*)GlobalGenerator)->g_fc)
+  , m_fileContext(((cmGlobalFastbuildGenerator*)GlobalCommonGenerator)->g_fc)
 {
 }
 
@@ -25,19 +25,14 @@ void cmFastbuildTargetGenerator::DetectTargetCompileDependencies(
   if (GeneratorTarget->GetType() == cmStateEnums::GLOBAL_TARGET) {
     // Global targets only depend on other utilities, which may not appear in
     // the TargetDepends set (e.g. "all").
-    std::set<std::string> const& utils = GeneratorTarget->GetUtilities();
-    std::copy(utils.begin(), utils.end(), std::back_inserter(dependencies));
+    for (const auto& u : GeneratorTarget->GetUtilities())
+      dependencies.push_back(u.Value);
   } else {
-    cmTargetDependSet const& targetDeps =
-      gg->GetTargetDirectDepends(GeneratorTarget);
-    for (cmTargetDependSet::const_iterator i = targetDeps.begin();
-         i != targetDeps.end(); ++i) {
-      const cmTargetDepend& depTarget = *i;
-      if (depTarget->GetType() == cmStateEnums::INTERFACE_LIBRARY) {
-        continue;
+    for (const auto& depTarget : gg->GetTargetDirectDepends(GeneratorTarget)) {
+      if (depTarget->GetType() != cmStateEnums::INTERFACE_LIBRARY) {
+        dependencies.push_back(depTarget->GetName());
       }
-      dependencies.push_back(depTarget->GetName());
-    }
+	}
   }
 }
 
@@ -172,7 +167,7 @@ bool cmFastbuildTargetGenerator::WriteCustomBuildRules()
       // from another command. Need to sort the commands to output them in
       // order.
       cmGlobalFastbuildGenerator::Detail::Detection::DependencySorter::
-        CustomCommandHelper ccHelper = { GlobalGenerator, LocalGenerator,
+        CustomCommandHelper ccHelper = { GlobalCommonGenerator, LocalCommonGenerator,
                                          configName };
       cmGlobalFastbuildGenerator::Detail::Detection::DependencySorter::Sort(
         ccHelper, customCommands);
@@ -232,7 +227,7 @@ void cmFastbuildTargetGenerator::WriteCustomCommand(
   std::string& targetName, const std::string& hostTargetName)
 {
   // We need to generate the command for execution.
-  cmCustomCommandGenerator ccg(*cc, configName, LocalGenerator);
+  cmCustomCommandGenerator ccg(*cc, configName, LocalCommonGenerator);
 
   const std::vector<std::string>& outputs = ccg.GetOutputs();
   const std::vector<std::string>& byproducts = ccg.GetByproducts();
@@ -317,7 +312,7 @@ void cmFastbuildTargetGenerator::WriteCustomCommand(
        iter != depends.end(); ++iter) {
     const std::string& dep = *iter;
 
-    bool isTarget = GlobalGenerator->FindTarget(dep) != NULL;
+    bool isTarget = GlobalCommonGenerator->FindTarget(dep) != NULL;
     if (isTarget) {
       orderDependencies.push_back(dep + "-" + configName);
     } else {
@@ -410,7 +405,7 @@ void cmFastbuildTargetGenerator::WriteCustomCommand(
       m_fileContext.WriteVariable("ExecUseStdOutAsOutput", "true");
 
       std::string outputDir =
-        LocalGenerator->GetMakefile()->GetHomeOutputDirectory();
+        LocalCommonGenerator->GetMakefile()->GetHomeOutputDirectory();
       mergedOutputs.push_back(outputDir + "/dummy-out-" + targetName + ".txt");
     }
     // Currently fastbuild doesn't support more than 1
@@ -426,28 +421,25 @@ void cmFastbuildTargetGenerator::DetectOutput(
   FastbuildTargetNames& targetNamesOut, const std::string& configName)
 {
   if (GeneratorTarget->GetType() == cmStateEnums::EXECUTABLE) {
-    GeneratorTarget->GetExecutableNames(
-      targetNamesOut.targetNameOut, targetNamesOut.targetNameReal,
-      targetNamesOut.targetNameImport, targetNamesOut.targetNamePDB,
-      configName);
+    //GeneratorTarget->GetExecutableNames(
+    //  targetNamesOut.targetNameOut, targetNamesOut.targetNameReal,
+    //  targetNamesOut.targetNameImport, targetNamesOut.targetNamePDB,
+    //  configName);
   } else {
-    GeneratorTarget->GetLibraryNames(
-      targetNamesOut.targetNameOut, targetNamesOut.targetNameSO,
-      targetNamesOut.targetNameReal, targetNamesOut.targetNameImport,
-      targetNamesOut.targetNamePDB, configName);
+    //GeneratorTarget->GetLibraryNames(
+    //  targetNamesOut.targetNameOut, targetNamesOut.targetNameSO,
+    //  targetNamesOut.targetNameReal, targetNamesOut.targetNameImport,
+    //  targetNamesOut.targetNamePDB, configName);
   }
 
   if (GeneratorTarget->HaveWellDefinedOutputFiles()) {
     targetNamesOut.targetOutputDir = GeneratorTarget->GetDirectory(configName);
 
     targetNamesOut.targetOutput = GeneratorTarget->GetFullPath(configName);
-    targetNamesOut.targetOutputReal =
-      GeneratorTarget->GetFullPath(configName,
-                                   /*implib=*/false,
-                                   /*realpath=*/true);
-    targetNamesOut.targetOutputImplib =
-      GeneratorTarget->GetFullPath(configName,
-                                   /*implib=*/true);
+    targetNamesOut.targetOutputReal = GeneratorTarget->GetFullPath(
+      configName, cmStateEnums::ArtifactType::RuntimeBinaryArtifact, true);
+    targetNamesOut.targetOutputImplib = GeneratorTarget->GetFullPath(
+      configName, cmStateEnums::ArtifactType::ImportLibraryArtifact);
   } else {
     targetNamesOut.targetOutputDir = GeneratorTarget->GetSupportDirectory();
     if (targetNamesOut.targetOutputDir.empty() ||
@@ -516,7 +508,7 @@ void cmFastbuildTargetGenerator::DetectLinkerLibPaths(
   std::vector<std::string> const& libDirs = cli.GetDirectories();
   for (std::vector<std::string>::const_iterator libDir = libDirs.begin();
        libDir != libDirs.end(); ++libDir) {
-    std::string libpath = LocalGenerator->ConvertToOutputForExisting(
+    std::string libpath = LocalCommonGenerator->ConvertToOutputForExisting(
       *libDir, cmLocalGenerator::SHELL);
     cmSystemTools::ConvertToOutputSlashes(libpath);
 
@@ -542,9 +534,9 @@ bool cmFastbuildTargetGenerator::DetectBaseLinkerCommand(
   const std::string& linkLanguage =
     GeneratorTarget->GetLinkerLanguage(configName);
   if (linkLanguage.empty()) {
-    cmSystemTools::Error("CMake can not determine linker language for "
-                         "target: ",
-                         GeneratorTarget->GetName().c_str());
+    cmSystemTools::Error(
+      "CMake can not determine linker language for target: " +
+      GeneratorTarget->GetName());
     return false;
   }
 
@@ -598,13 +590,14 @@ bool cmFastbuildTargetGenerator::DetectBaseLinkerCommand(
   // Rule for linking library/executable.
   std::vector<std::string> linkCmds;
   ComputeLinkCmds(linkCmds, configName);
-  CM_AUTO_PTR<cmRulePlaceholderExpander> rulePlaceholderExpander(
-    ((cmLocalFastbuildGenerator*)LocalGenerator)
-      ->CreateRulePlaceholderExpander());
+  std::unique_ptr<cmRulePlaceholderExpander> rulePlaceholderExpander{
+    static_cast<cmLocalFastbuildGenerator*>(LocalCommonGenerator)
+      ->CreateRulePlaceholderExpander()
+  };
   for (std::vector<std::string>::iterator i = linkCmds.begin();
        i != linkCmds.end(); ++i) {
     rulePlaceholderExpander->ExpandRuleVariables(
-      ((cmLocalFastbuildGenerator*)LocalGenerator), *i, vars);
+      ((cmLocalFastbuildGenerator*)LocalCommonGenerator), *i, vars);
   }
 
   command = BuildCommandLine(linkCmds);
@@ -620,9 +613,9 @@ void cmFastbuildTargetGenerator::ComputeLinkCmds(
   {
     std::string linkCmdVar =
       GeneratorTarget->GetCreateRuleVariable(linkLanguage, configName);
-    const char* linkCmd = Makefile->GetDefinition(linkCmdVar);
+    auto linkCmd = Makefile->GetDefinition(linkCmdVar);
     if (linkCmd) {
-      cmSystemTools::ExpandListArgument(linkCmd, linkCmds);
+      cmExpandList(linkCmd, linkCmds);
       return;
     }
   }
@@ -633,7 +626,7 @@ void cmFastbuildTargetGenerator::ComputeLinkCmds(
       // We have archive link commands set. First, delete the existing
       // archive.
       {
-        std::string cmakeCommand = LocalGenerator->ConvertToOutputFormat(
+        std::string cmakeCommand = LocalCommonGenerator->ConvertToOutputFormat(
           Makefile->GetRequiredDefinition("CMAKE_COMMAND"),
           cmLocalGenerator::SHELL);
         linkCmds.push_back(cmakeCommand + " -E remove $TARGET_FILE");
@@ -643,15 +636,15 @@ void cmFastbuildTargetGenerator::ComputeLinkCmds(
         std::string linkCmdVar = "CMAKE_";
         linkCmdVar += linkLanguage;
         linkCmdVar += "_ARCHIVE_CREATE";
-        const char* linkCmd = Makefile->GetRequiredDefinition(linkCmdVar);
-        cmSystemTools::ExpandListArgument(linkCmd, linkCmds);
+        auto linkCmd = Makefile->GetRequiredDefinition(linkCmdVar);
+        cmExpandList(linkCmd, linkCmds);
       }
       {
         std::string linkCmdVar = "CMAKE_";
         linkCmdVar += linkLanguage;
         linkCmdVar += "_ARCHIVE_FINISH";
-        const char* linkCmd = Makefile->GetRequiredDefinition(linkCmdVar);
-        cmSystemTools::ExpandListArgument(linkCmd, linkCmds);
+        auto linkCmd = Makefile->GetRequiredDefinition(linkCmdVar);
+        cmExpandList(linkCmd, linkCmds);
       }
       return;
     }
@@ -672,21 +665,23 @@ std::string cmFastbuildTargetGenerator::ComputeDefines(
   std::set<std::string> defines;
 
   // Add the export symbol definition for shared library objects.
-  if (const char* exportMacro = GeneratorTarget->GetExportMacro()) {
-    LocalGenerator->AppendDefines(defines, exportMacro);
+  auto exportMacro = GeneratorTarget->GetExportMacro();
+  if (exportMacro) {
+    LocalCommonGenerator->AppendDefines(defines, *exportMacro);
   }
 
   // Add preprocessor definitions for this target and configuration.
-  LocalGenerator->AddCompileDefinitions(defines, GeneratorTarget, configName,
-                                        language);
+  LocalCommonGenerator->GetTargetDefines(GeneratorTarget, configName, language,
+                                         defines);
 
   if (source) {
-    LocalGenerator->AppendDefines(defines,
+    LocalCommonGenerator->AppendDefines(defines,
                                   source->GetProperty("COMPILE_DEFINITIONS"));
 
     std::string defPropName = "COMPILE_DEFINITIONS_";
     defPropName += cmSystemTools::UpperCase(configName);
-    LocalGenerator->AppendDefines(defines, source->GetProperty(defPropName));
+    LocalCommonGenerator->AppendDefines(defines,
+                                        source->GetProperty(defPropName));
   }
 
   // Add a definition for the configuration name.
@@ -695,10 +690,10 @@ std::string cmFastbuildTargetGenerator::ComputeDefines(
   std::string configDefine = "CMAKE_INTDIR=\"";
   configDefine += configName;
   configDefine += "\"";
-  LocalGenerator->AppendDefines(defines, configDefine);
+  LocalCommonGenerator->AppendDefines(defines, configDefine);
 
   std::string definesString;
-  LocalGenerator->JoinDefines(defines, definesString, language);
+  LocalCommonGenerator->JoinDefines(defines, definesString, language);
 
   return definesString;
 }
@@ -732,17 +727,19 @@ void cmFastbuildTargetGenerator::DetectBaseCompileCommand(
   compileCmdVar += language;
   compileCmdVar += "_COMPILE_OBJECT";
   std::string compileCmd =
-    LocalGenerator->GetMakefile()->GetRequiredDefinition(compileCmdVar);
+    LocalCommonGenerator->GetMakefile()->GetRequiredDefinition(compileCmdVar);
   std::vector<std::string> compileCmds;
-  cmSystemTools::ExpandListArgument(compileCmd, compileCmds);
+  cmExpandList(compileCmd, compileCmds);
 
-  CM_AUTO_PTR<cmRulePlaceholderExpander> rulePlaceholderExpander(
-    ((cmLocalFastbuildGenerator*)LocalGenerator)
-      ->CreateRulePlaceholderExpander());
+  auto localFastbuildGenerator =
+    static_cast<cmLocalFastbuildGenerator*>(LocalCommonGenerator);
+
+  std::unique_ptr<cmRulePlaceholderExpander> rulePlaceholderExpander(
+    localFastbuildGenerator->CreateRulePlaceholderExpander());
   for (std::vector<std::string>::iterator i = compileCmds.begin();
        i != compileCmds.end(); ++i) {
-    rulePlaceholderExpander->ExpandRuleVariables(
-      ((cmLocalFastbuildGenerator*)LocalGenerator), *i, compileObjectVars);
+    rulePlaceholderExpander->ExpandRuleVariables(localFastbuildGenerator, *i,
+                                                 compileObjectVars);
   }
 
   command = BuildCommandLine(compileCmds);
@@ -763,7 +760,7 @@ void cmFastbuildTargetGenerator::DetectTargetObjectDependencies(
     const std::string& objectLib = (*i)->GetObjectLibrary();
     if (!objectLib.empty()) {
       // Find the target this actually is (might be an alias)
-      const cmTarget* objectTarget = GlobalGenerator->FindTarget(objectLib);
+      const cmTarget* objectTarget = GlobalCommonGenerator->FindTarget(objectLib);
       if (objectTarget) {
         objectLibs.insert(objectTarget->GetName() + "-" + configName +
                           "-products");
@@ -810,7 +807,7 @@ std::string cmFastbuildTargetGenerator::DetectTargetCompileOutputDir(
   std::string configName) const
 {
   std::string result =
-    LocalGenerator->GetTargetDirectory(GeneratorTarget) + "/";
+    LocalCommonGenerator->GetTargetDirectory(GeneratorTarget) + "/";
   if (!configName.empty()) {
     result = result + configName + "/";
   }
@@ -924,12 +921,12 @@ void cmFastbuildTargetGenerator::SplitExecutableAndFlags(
 }
 
 void cmFastbuildTargetGenerator::EnsureDirectoryExists(
-  const std::string& path, const char* homeOutputDirectory)
+  const std::string& path, const std::string& homeOutputDirectory)
 {
   if (cmSystemTools::FileIsFullPath(path.c_str())) {
     cmSystemTools::MakeDirectory(path.c_str());
   } else {
-    const std::string fullPath = std::string(homeOutputDirectory) + "/" + path;
+    const std::string fullPath = homeOutputDirectory + "/" + path;
     cmSystemTools::MakeDirectory(fullPath.c_str());
   }
 }
@@ -986,7 +983,7 @@ void cmFastbuildTargetGenerator::Generate()
   m_fileContext.WritePushScope();
 
   std::vector<std::string> dependencies;
-  DetectTargetCompileDependencies(GlobalGenerator, dependencies);
+  DetectTargetCompileDependencies(GlobalCommonGenerator, dependencies);
 
   // Iterate over each configuration
   // This time to define linker settings for each config
@@ -1200,7 +1197,7 @@ void cmFastbuildTargetGenerator::Generate()
           // Detect flags and defines
           std::string compilerFlags;
           cmGlobalFastbuildGenerator::Detail::Detection::DetectCompilerFlags(
-            compilerFlags, LocalGenerator, GeneratorTarget, srcFile,
+            compilerFlags, LocalCommonGenerator, GeneratorTarget, srcFile,
             objectGroupLanguage, configName);
           std::string compileDefines =
             ComputeDefines(srcFile, configName, objectGroupLanguage);
@@ -1368,12 +1365,12 @@ void cmFastbuildTargetGenerator::Generate()
         std::string frameworkPath;
         std::string linkPath;
 
-        CM_AUTO_PTR<cmLinkLineComputer> linkLineComputer(
-          GlobalGenerator->CreateLinkLineComputer(
-            LocalGenerator,
-            LocalGenerator->GetStateSnapshot().GetDirectory()));
+        std::unique_ptr<cmLinkLineComputer> linkLineComputer(
+          GlobalCommonGenerator->CreateLinkLineComputer(
+            LocalCommonGenerator,
+            LocalCommonGenerator->GetStateSnapshot().GetDirectory()));
 
-        LocalGenerator->GetTargetFlags(
+        LocalCommonGenerator->GetTargetFlags(
           linkLineComputer.get(), configName, linkLibs, targetFlags, linkFlags,
           frameworkPath, linkPath, GeneratorTarget);
 
@@ -1389,7 +1386,7 @@ void cmFastbuildTargetGenerator::Generate()
 
         if (GeneratorTarget->IsExecutableWithExports()) {
           const char* defFileFlag =
-            LocalGenerator->GetMakefile()->GetDefinition(
+            LocalCommonGenerator->GetMakefile()->GetDefinition(
               "CMAKE_LINK_DEF_FILE_FLAG");
           cmGeneratorTarget::ModuleDefinitionInfo const* defFile =
             GeneratorTarget->GetModuleDefinitionInfo(configName);
@@ -1418,7 +1415,7 @@ void cmFastbuildTargetGenerator::Generate()
 
         std::string language = GeneratorTarget->GetLinkerLanguage(configName);
         std::string linkerType =
-          LocalGenerator->GetMakefile()->GetSafeDefinition(
+          LocalCommonGenerator->GetMakefile()->GetSafeDefinition(
             "CMAKE_" + language + "_COMPILER_ID");
 
         m_fileContext.WriteVariable(
