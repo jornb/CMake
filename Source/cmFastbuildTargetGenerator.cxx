@@ -421,15 +421,19 @@ void cmFastbuildTargetGenerator::DetectOutput(
   FastbuildTargetNames& targetNamesOut, const std::string& configName)
 {
   if (GeneratorTarget->GetType() == cmStateEnums::EXECUTABLE) {
-    //GeneratorTarget->GetExecutableNames(
-    //  targetNamesOut.targetNameOut, targetNamesOut.targetNameReal,
-    //  targetNamesOut.targetNameImport, targetNamesOut.targetNamePDB,
-    //  configName);
+	auto names = GeneratorTarget->GetExecutableNames(configName);
+    targetNamesOut.targetNameOut = names.Output;
+    targetNamesOut.targetNameSO = names.SharedObject;
+    targetNamesOut.targetNameReal = names.Real;
+    targetNamesOut.targetNameImport = names.ImportLibrary;
+    targetNamesOut.targetNamePDB = names.PDB;
   } else {
-    //GeneratorTarget->GetLibraryNames(
-    //  targetNamesOut.targetNameOut, targetNamesOut.targetNameSO,
-    //  targetNamesOut.targetNameReal, targetNamesOut.targetNameImport,
-    //  targetNamesOut.targetNamePDB, configName);
+    auto names = GeneratorTarget->GetLibraryNames(configName);
+    targetNamesOut.targetNameOut = names.Output;
+    targetNamesOut.targetNameSO = names.SharedObject;
+    targetNamesOut.targetNameReal = names.Real;
+    targetNamesOut.targetNameImport = names.ImportLibrary;
+    targetNamesOut.targetNamePDB = names.PDB;
   }
 
   if (GeneratorTarget->HaveWellDefinedOutputFiles()) {
@@ -675,13 +679,15 @@ std::string cmFastbuildTargetGenerator::ComputeDefines(
                                          defines);
 
   if (source) {
-    LocalCommonGenerator->AppendDefines(defines,
-                                  source->GetProperty("COMPILE_DEFINITIONS"));
+    auto compileDefinitions = source->GetProperty("COMPILE_DEFINITIONS");
+    if (compileDefinitions)
+		LocalCommonGenerator->AppendDefines(defines, compileDefinitions);
 
     std::string defPropName = "COMPILE_DEFINITIONS_";
     defPropName += cmSystemTools::UpperCase(configName);
-    LocalCommonGenerator->AppendDefines(defines,
-                                        source->GetProperty(defPropName));
+    compileDefinitions = source->GetProperty(defPropName);
+    if (compileDefinitions)
+      LocalCommonGenerator->AppendDefines(defines, compileDefinitions);
   }
 
   // Add a definition for the configuration name.

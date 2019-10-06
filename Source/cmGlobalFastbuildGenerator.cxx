@@ -330,7 +330,7 @@ void cmGlobalFastbuildGenerator::Detail::Detection::DetectCompilerFlags(
   lg->AddCompileOptions(compileFlags, (cmGeneratorTarget*)gt, language,
                         configName);
 
-  if (source) {
+  if (source && source->GetProperty("COMPILE_FLAGS")) {
     lg->AppendFlags(compileFlags, source->GetProperty("COMPILE_FLAGS"));
   }
 }
@@ -981,73 +981,76 @@ void cmGlobalFastbuildGenerator::Generate()
 }
 
 //----------------------------------------------------------------------------
-void cmGlobalFastbuildGenerator::GenerateBuildCommand(
-  std::vector<std::string>& makeCommand, const std::string& makeProgram,
-  const std::string& projectName, const std::string& projectDir,
-  const std::string& targetName, const std::string& config, bool /*fast*/,
-  bool /*verbose*/, std::vector<std::string> const& /*makeOptions*/)
+
+std::vector<cmGlobalGenerator::GeneratedMakeCommand>
+cmGlobalFastbuildGenerator::GenerateBuildCommand(
+  const std::string& makeProgram, const std::string& projectName,
+  const std::string& projectDir, std::vector<std::string> const& targetNames,
+  const std::string& config, bool /*fast*/, int /*jobs*/, bool /*verbose*/,
+  std::vector<std::string> const& /*makeOptions*/)
 {
+  std::vector<cmGlobalGenerator::GeneratedMakeCommand> commands;
+
   // A build command for fastbuild looks like this:
   // fbuild.exe [make-options] [-config projectName.bff] <target>-<config>
-
-  // Setup make options
-  std::vector<std::string> makeOptionsSelected;
 
   // Select the caller- or user-preferred make program
   std::string makeProgramSelected = this->SelectMakeProgram(makeProgram);
 
-  // Select the target
-  std::string targetSelected = targetName;
-  // Note an empty target is a valid target (defaults to ALL anyway)
-  if (targetSelected == "clean") {
-    makeOptionsSelected.push_back("-clean");
-    targetSelected = "";
+  for (const auto& targetName : targetNames) {
+
+    // Build the command
+    cmGlobalGenerator::GeneratedMakeCommand makeCommand;
+    makeCommand.Add(makeProgramSelected);
+
+    // Select the target
+    std::string targetSelected = targetName;
+    // Note an empty target is a valid target (defaults to ALL anyway)
+    if (targetSelected == "clean") {
+      makeCommand.Add("-clean");
+      targetSelected = "";
+    }
+
+    // Select the config, default to Debug
+    std::string configSelected = config;
+    if (configSelected.empty()) {
+      configSelected = "Debug";
+    }
+
+    // Select fastbuild target
+    if (targetSelected.empty()) {
+      targetSelected = configSelected;
+    } else {
+      targetSelected += "-" + configSelected;
+    }
+
+    // Hunt the fbuild.bff file in the directory above
+    std::string configFile;
+    if (!cmSystemTools::FileExists(projectDir + "fbuild.bff")) {
+      configFile = cmSystemTools::FileExistsInParentDirectories(
+        "fbuild.bff", projectDir.c_str(), "");
+    }
+
+    /*
+    makeCommand.Add("-config");
+    makeCommand.Add(projectName + ".bff");
+    */
+    makeCommand.Add("-showcmds");
+    makeCommand.Add("-ide");
+
+    if (!configFile.empty()) {
+      makeCommand.Add("-config", configFile);
+    }
+
+    // Add the target-config to the command
+    if (!targetSelected.empty()) {
+      makeCommand.Add(targetSelected);
+    }
+
+	commands.push_back(makeCommand);
   }
 
-  // Select the config
-  std::string configSelected = config;
-  if (configSelected.empty()) {
-    configSelected = "Debug";
-  }
-
-  // Select fastbuild target
-  if (targetSelected.empty()) {
-    targetSelected = configSelected;
-  } else {
-    targetSelected += "-" + configSelected;
-  }
-
-  // Hunt the fbuild.bff file in the directory above
-  std::string configFile;
-  if (!cmSystemTools::FileExists(projectDir + "fbuild.bff")) {
-    configFile = cmSystemTools::FileExistsInParentDirectories(
-      "fbuild.bff", projectDir.c_str(), "");
-  }
-
-  // Build the command
-  makeCommand.push_back(makeProgramSelected);
-
-  // Push in the make options
-  makeCommand.insert(makeCommand.end(), makeOptionsSelected.begin(),
-                     makeOptionsSelected.end());
-
-  /*
-  makeCommand.push_back("-config");
-  makeCommand.push_back(projectName + ".bff");
-  */
-
-  makeCommand.push_back("-showcmds");
-  makeCommand.push_back("-ide");
-
-  if (!configFile.empty()) {
-    makeCommand.push_back("-config");
-    makeCommand.push_back(configFile);
-  }
-
-  // Add the target-config to the command
-  if (!targetSelected.empty()) {
-    makeCommand.push_back(targetSelected);
-  }
+  return commands;
 }
 
 //----------------------------------------------------------------------------
