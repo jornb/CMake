@@ -17,6 +17,13 @@
 class cmGlobalGeneratorFactory;
 class cmCustomCommandGenerator;
 
+namespace fastbuild {
+  namespace detail {
+    std::set<std::string> DetectTargetLanguages(
+      const std::set<cmGeneratorTarget*>& targets);
+  }
+}
+
 /** \class cmGlobalFastbuildGenerator
  * \brief Class for global fastbuild generator.
  */
@@ -61,11 +68,12 @@ public:
 
 private:
   std::set<cmGeneratorTarget*> DetectTargetGenerators() const;
-  std::set<std::string> DetectTargetLanguages(
-    const std::set<cmGeneratorTarget*>& targets) const;
 
   void GenerateBffFile();
   void GenerateBffCompilerSection(
+    cmFastbuildFileWriter& file, cmMakefile* makefile,
+    const std::set<cmGeneratorTarget*>& targets) const;
+  void GenerateBffTargetSection(
     cmFastbuildFileWriter& file, cmMakefile* makefile,
     const std::set<cmGeneratorTarget*>& targets) const;
 };

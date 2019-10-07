@@ -39,32 +39,56 @@ void cmFastbuildFileWriter::Write(const Compiler& compiler)
   // Write additional files
   if (!compiler.ExtraFiles.empty()) {
     file << currentIndent << ".ExtraFiles = ";
-    PushScope("{");
-    for (size_t i = 0; i < compiler.ExtraFiles.size(); ++i) {
-      file << currentIndent << "'" << compiler.ExtraFiles[i] << "'";
-
-      if (i < compiler.ExtraFiles.size() - 1)
-        file << ",";
-
-      file << "\n";
-    }
-    PopScope("}");
+    WriteArray(compiler.ExtraFiles);
   }
 
   PopFunctionCall();
 }
 
-void cmFastbuildFileWriter::WriteVariable(
-  const std::string& name, const std::string& string_literal_argument)
+void cmFastbuildFileWriter::Write(const ObjectList& objectList)
 {
-  file << currentIndent << "." << name << " = '" << string_literal_argument
-       << "'\n";
+  PushFunctionCall("ObjectList", objectList.Alias);
+  WriteVariable("Compiler", objectList.Compiler);
+  WriteVariable("CompilerOptions", objectList.CompilerOptions);
+
+  auto tmp = objectList.CompilerOutputPath;
+  cmSystemTools::ConvertToOutputSlashes(tmp);
+  WriteVariable("CompilerOutputPath", tmp);
+
+  // Write files
+  file << currentIndent << ".CompilerInputFiles = ";
+  WriteArray(objectList.CompilerInputFiles, true);
+
+  PopFunctionCall();
+}
+
+void cmFastbuildFileWriter::Write(const Alias& alias)
+{
+  PushFunctionCall("Alias", alias.Name);
+  file << currentIndent << ".Targets  = ";
+  WriteArray(alias.Targets);
+  PopFunctionCall();
+}
+
+void cmFastbuildFileWriter::WriteVariable(
+  const std::string& name, const std::string& string_literal_argument,
+  bool convertPaths)
+{
+  file << currentIndent << "." << name << " = '";
+  if (convertPaths) {
+    auto tmp = string_literal_argument;
+    cmSystemTools::ConvertToOutputSlashes(tmp);
+    file << tmp;
+  } else {
+    file << string_literal_argument;
+  }
+  file << "'\n";
 }
 
 void cmFastbuildFileWriter::PushFunctionCall(
   const std::string& function, const std::string& string_literal_argument)
 {
-  file << function << "(";
+  file << currentIndent << function << "(";
   if (!string_literal_argument.empty()) {
     file << "'" << string_literal_argument << "'";
   }
@@ -96,4 +120,30 @@ void cmFastbuildFileWriter::PopScope(const std::string& delimiter)
 
   // Write the ending delimeter on a separate line
   file << currentIndent << delimiter << "\n";
+}
+
+void cmFastbuildFileWriter::WriteArray(const std::vector<std::string>& values,
+                                       bool convertPaths, bool quote)
+{
+  PushScope("{");
+  for (size_t i = 0; i < values.size(); ++i) {
+    file << currentIndent;
+    if (quote)
+      file << "'";
+    if (convertPaths) {
+      auto tmp = values[i];
+      cmSystemTools::ConvertToOutputSlashes(tmp);
+      file << tmp;
+    } else {
+      file << values[i];
+    }
+    if (quote)
+      file << "'";
+
+    if (i < values.size() - 1)
+      file << ",";
+
+    file << "\n";
+  }
+  PopScope("}");
 }

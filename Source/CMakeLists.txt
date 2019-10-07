@@ -827,6 +827,9 @@ set(SRCS ${SRCS}
   cmFastbuildFileWriter.h
   cmFastbuildLinkLineComputer.cxx
   cmFastbuildLinkLineComputer.h
+  cmFastbuildTargetGenerator.cxx
+  cmFastbuildTargetGenerator.h
+  cmFastbuildLinkLineComputer.h
   cmGlobalFastbuildGenerator.h
   cmGlobalFastbuildGenerator.cxx
   cmLocalFastbuildGenerator.cxx

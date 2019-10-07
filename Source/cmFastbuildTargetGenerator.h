@@ -4,14 +4,25 @@
 #define cmFastbuildTargetGenerator_h
 
 #include "cmCommonTargetGenerator.h"
+#include "cmFastbuildFileWriter.h"
 
 class cmFastbuildTargetGenerator : public cmCommonTargetGenerator
 {
 public:
-  cmFastbuildTargetGenerator(cmGeneratorTarget* gt);
+  cmFastbuildTargetGenerator(cmFastbuildFileWriter& file,
+                             cmGeneratorTarget* gt);
   virtual ~cmFastbuildTargetGenerator() = default;
 
   void Generate();
+
+  // cmCommonTargetGenerator interface
+  void AddIncludeFlags(std::string& flags, std::string const& lang) {}
+
+private:
+  std::string GetCompileArguments(const std::string& language);
+
+private:
+  cmFastbuildFileWriter& File;
 };
 
 #endif
