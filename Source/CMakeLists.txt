@@ -823,6 +823,8 @@ set(SRCS ${SRCS}
 
 # Fastbuild support
 set(SRCS ${SRCS}
+  cmFastbuildFileWriter.cxx
+  cmFastbuildFileWriter.h
   cmFastbuildLinkLineComputer.cxx
   cmFastbuildLinkLineComputer.h
   cmGlobalFastbuildGenerator.h
