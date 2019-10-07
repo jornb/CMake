@@ -3,12 +3,16 @@
 #ifndef cmGlobalFastbuildGenerator_h
 #define cmGlobalFastbuildGenerator_h
 
+#include <set>
+
 #include "cmGeneratedFileStream.h"
 #include "cmGlobalCommonGenerator.h"
 #include "cmGlobalGenerator.h"
 #include "cmLocalCommonGenerator.h"
 #include "cmLocalFastbuildGenerator.h"
 #include "cmDocumentationEntry.h"
+#include "cmFastbuildFileWriter.h"
+#include "cmMakefile.h"
 
 class cmGlobalGeneratorFactory;
 class cmCustomCommandGenerator;
@@ -56,7 +60,14 @@ public:
   std::string ConvertToFastbuildPath(const std::string& path) const;
 
 private:
+  std::set<cmGeneratorTarget*> DetectTargetGenerators() const;
+  std::set<std::string> DetectTargetLanguages(
+    const std::set<cmGeneratorTarget*>& targets) const;
+
   void GenerateBffFile();
+  void GenerateBffCompilerSection(
+    cmFastbuildFileWriter& file, cmMakefile* makefile,
+    const std::set<cmGeneratorTarget*>& targets) const;
 };
 
 #endif
