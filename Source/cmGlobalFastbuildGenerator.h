@@ -52,7 +52,11 @@ public:
   bool IsMultiConfig() const override { return true; }
   // End cmGlobalGenerator interface
 
+  // Utility methods
   std::string ConvertToFastbuildPath(const std::string& path) const;
+
+private:
+  void GenerateBffFile();
 };
 
 #endif
