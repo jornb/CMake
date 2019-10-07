@@ -58,6 +58,7 @@
 #  if !defined(CMAKE_BOOT_MINGW)
 #    include "cmGlobalBorlandMakefileGenerator.h"
 #    include "cmGlobalJOMMakefileGenerator.h"
+#    include "cmGlobalFastbuildGenerator.h"
 #    include "cmGlobalNMakeMakefileGenerator.h"
 #    include "cmGlobalVisualStudio10Generator.h"
 #    include "cmGlobalVisualStudio11Generator.h"
@@ -1893,6 +1894,7 @@ void cmake::AddDefaultGenerators()
   this->Generators.push_back(cmGlobalBorlandMakefileGenerator::NewFactory());
   this->Generators.push_back(cmGlobalNMakeMakefileGenerator::NewFactory());
   this->Generators.push_back(cmGlobalJOMMakefileGenerator::NewFactory());
+  this->Generators.push_back(cmGlobalFastbuildGenerator::NewFactory());
 #  endif
   this->Generators.push_back(cmGlobalMSYSMakefileGenerator::NewFactory());
   this->Generators.push_back(cmGlobalMinGWMakefileGenerator::NewFactory());

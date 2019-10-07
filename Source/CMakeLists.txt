@@ -821,6 +821,16 @@ set(SRCS ${SRCS}
   cmNinjaLinkLineDeviceComputer.h
   )
 
+# Fastbuild support
+set(SRCS ${SRCS}
+  cmFastbuildLinkLineComputer.cxx
+  cmFastbuildLinkLineComputer.h
+  cmGlobalFastbuildGenerator.h
+  cmGlobalFastbuildGenerator.cxx
+  cmLocalFastbuildGenerator.cxx
+  cmLocalFastbuildGenerator.h
+  )
+
 # Temporary variable for tools targets
 set(_tools)
 
