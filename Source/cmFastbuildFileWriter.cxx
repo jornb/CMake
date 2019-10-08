@@ -6,6 +6,47 @@
 
 #include "cmSystemTools.h"
 
+#ifdef _WIN32
+void cmFastbuildFileWriter::GenerateBuildScript(
+  const std::string& filePrefix, cmFastbuildFileWriter::Exec& exec,
+  const cmCustomCommand& command)
+{
+  auto filename = filePrefix + ".bat";
+
+  // Write build script
+  {
+    // Open file
+    cmGeneratedFileStream file;
+    file.Open(filename);
+
+    file << "REM Auto-generated script file for CMake build event\n\n";
+    if (command.GetComment()) {
+      file << "REM " << command.GetComment() << "\n\n";
+    }
+    file << "setlocal\n";
+    for (const auto& cmd : command.GetCommandLines()) {
+      for (const auto& arg : cmd) {
+        file << arg << " ";
+      }
+      file << "\n";
+      file << "if %errorlevel% neq 0 goto :end\n";
+    }
+    file << ":end\n";
+    file << "endlocal & exit /b %errorlevel%\n";
+
+    // Close file
+    file.Close();
+  }
+
+  // Setup exec
+  exec.ExecExecutable = cmSystemTools::FindProgram("cmd.exe");
+  exec.ExecArguments.push_back("/C");
+  exec.ExecArguments.push_back(filename);
+}
+#else
+// TODO
+#endif
+
 cmFastbuildFileWriter::cmFastbuildFileWriter(const std::string& filename)
 {
   file.Open(filename);
@@ -70,6 +111,42 @@ void cmFastbuildFileWriter::Write(const Alias& alias)
   PopFunctionCall();
 }
 
+void cmFastbuildFileWriter::Write(const Library& library)
+{
+  // TODO
+}
+
+void cmFastbuildFileWriter::Write(const Exec& exec)
+{
+  PushFunctionCall("Exec", exec.Name);
+  WriteVariable("ExecExecutable", exec.ExecExecutable, true);
+  WriteVariable("ExecWorkingDir", exec.ExecWorkingDir, true);
+  WriteVariable("ExecOutput", exec.ExecOutput, true);
+  WriteVariable("ExecUseStdOutAsOutput", exec.ExecUseStdOutAsOutput);
+  WriteVariable("ExecAlways", exec.ExecAlways);
+
+  // Write exec arguments as string
+  if (!exec.ExecArguments.empty()) {
+    file << currentIndent << ".ExecArguments = '";
+    for (size_t i = 0; i < exec.ExecArguments.size(); ++i) {
+      if (i > 0) {
+        file << " ";
+      }
+
+	  // TODO: Quote
+      file << exec.ExecArguments[i];
+    }
+    file << "'\n";
+  }
+
+  if (!exec.PreBuildDependencies.empty()) {
+    file << currentIndent << ".PreBuildDependencies = ";
+    WriteArray(exec.PreBuildDependencies);
+  }
+
+  PopFunctionCall();
+}
+
 void cmFastbuildFileWriter::WriteVariable(
   const std::string& name, const std::string& string_literal_argument,
   bool convertPaths)
@@ -83,6 +160,13 @@ void cmFastbuildFileWriter::WriteVariable(
     file << string_literal_argument;
   }
   file << "'\n";
+}
+
+void cmFastbuildFileWriter::WriteVariable(const std::string& name,
+                                          bool boolean_literal)
+{
+  file << currentIndent << "." << name << " = "
+       << (boolean_literal ? "true" : "false") << "\n";
 }
 
 void cmFastbuildFileWriter::PushFunctionCall(
@@ -146,4 +230,66 @@ void cmFastbuildFileWriter::WriteArray(const std::vector<std::string>& values,
     file << "\n";
   }
   PopScope("}");
+}
+
+void cmFastbuildFileWriter::Target::ComputeNames()
+{
+  int i = 0;
+
+  for (auto& element : PreBuildEvents)
+    element.Name = Name + std::to_string(i++);
+
+  for (auto& element : ObjectLists)
+    element.Alias = Name + std::to_string(i++);
+
+  for (auto& element : PreLinkEvents)
+    element.Name = Name + std::to_string(i++);
+
+  if (HasLibrary)
+    Library.Name = Name + std::to_string(i++);
+
+  for (auto& element : PostBuildEvents)
+    element.Name = Name + std::to_string(i++);
+}
+
+void cmFastbuildFileWriter::Target::ComputeDummyOutputPaths(
+  const std::string& root)
+{
+  auto helper = [&root](auto& items) {
+    for (auto& element : items) {
+      if (element.ExecOutput.empty()) {
+        element.ExecOutput = root + "/" + element.Name + ".txt";
+        element.ExecUseStdOutAsOutput = true;
+        element.ExecAlways = true;
+      }
+    }
+  };
+
+  helper(PreBuildEvents);
+  helper(PreLinkEvents);
+  helper(PostBuildEvents);
+}
+
+void cmFastbuildFileWriter::Target::ComputeInternalDependencies()
+{
+}
+
+std::string cmFastbuildFileWriter::Target::GetLastExecutedAlias() const
+{
+  if (!PostBuildEvents.empty())
+    return PostBuildEvents.back().Name;
+
+  if (HasLibrary)
+    return Library.Name;
+
+  if (!PreLinkEvents.empty())
+    return PreLinkEvents.back().Name;
+
+  if (!ObjectLists.empty())
+    return ObjectLists.back().Alias;
+
+  if (!PreBuildEvents.empty())
+    return PreBuildEvents.back().Name;
+
+  return "";
 }
