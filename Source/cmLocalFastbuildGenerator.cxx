@@ -45,17 +45,6 @@ void cmLocalFastbuildGenerator::ComputeObjectFilenames(
   }
 }
 
-cmRulePlaceholderExpander*
-cmLocalFastbuildGenerator::CreateRulePlaceholderExpander() const
-{
-  cmRulePlaceholderExpander* ret =
-    new cmRulePlaceholderExpander(this->Compilers, this->VariableMappings,
-                                  this->CompilerSysroot, this->LinkerSysroot);
-  ret->SetTargetImpLib(FASTBUILD_DOLLAR_TAG
-                       "TargetOutputImplib" FASTBUILD_DOLLAR_TAG);
-  return ret;
-}
-
 void cmLocalFastbuildGenerator::Generate() { }
 
 std::string cmLocalFastbuildGenerator::GetTargetDirectory(

@@ -96,6 +96,11 @@ void cmFastbuildFileWriter::Write(const ObjectList& objectList)
   cmSystemTools::ConvertToOutputSlashes(tmp);
   WriteVariable("CompilerOutputPath", tmp);
 
+  if (!objectList.PreBuildDependencies.empty()) {
+    file << currentIndent << ".PreBuildDependencies = ";
+    WriteArray(objectList.PreBuildDependencies);
+  }
+
   // Write files
   file << currentIndent << ".CompilerInputFiles = ";
   WriteArray(objectList.CompilerInputFiles, true);
@@ -113,7 +118,39 @@ void cmFastbuildFileWriter::Write(const Alias& alias)
 
 void cmFastbuildFileWriter::Write(const Library& library)
 {
-  // TODO
+  PushFunctionCall(library.Type, library.Name);
+
+  if (library.Type == "Library") {
+    WriteVariable("Librarian", library.Linker);
+    WriteVariable("LibrarianOptions", library.LinkerOptions);
+    WriteVariable("LibrarianOutput", library.LinkerOutput);
+
+    // Fastbuild requires a compiler to be defined for linking.
+    // We'll just use a dummy compiler
+    WriteVariable("Compiler", library.DummyCompiler);
+    WriteVariable("CompilerOptions", "-c \"%1\" \"%2\"");
+    WriteVariable("CompilerOutputPath", "/dummy/");
+  } else {
+
+    // Exe or DLL
+    WriteVariable("Linker", library.Linker);
+    WriteVariable("LinkerOptions", library.LinkerOptions);
+    WriteVariable("LinkerOutput", library.LinkerOutput);
+  }
+
+  if (library.Type == "Library") {
+    file << currentIndent << ".LibrarianAdditionalInputs = ";
+  } else {
+    file << currentIndent << ".Libraries = ";
+  }
+  WriteArray(library.Libraries);
+
+  if (!library.PreBuildDependencies.empty()) {
+    file << currentIndent << ".PreBuildDependencies = ";
+    WriteArray(library.PreBuildDependencies);
+  }
+
+  PopFunctionCall();
 }
 
 void cmFastbuildFileWriter::Write(const Exec& exec)
@@ -133,7 +170,7 @@ void cmFastbuildFileWriter::Write(const Exec& exec)
         file << " ";
       }
 
-	  // TODO: Quote
+      // TODO: Quote
       file << exec.ExecArguments[i];
     }
     file << "'\n";
@@ -147,13 +184,13 @@ void cmFastbuildFileWriter::Write(const Exec& exec)
   PopFunctionCall();
 }
 
-void cmFastbuildFileWriter::WriteVariable(
-  const std::string& name, const std::string& string_literal_argument,
-  bool convertPaths)
+void cmFastbuildFileWriter::WriteVariable(const std::string& name,
+                                          const char* string_literal_argument,
+                                          bool convertPaths)
 {
   file << currentIndent << "." << name << " = '";
   if (convertPaths) {
-    auto tmp = string_literal_argument;
+    std::string tmp = string_literal_argument;
     cmSystemTools::ConvertToOutputSlashes(tmp);
     file << tmp;
   } else {
@@ -232,24 +269,46 @@ void cmFastbuildFileWriter::WriteArray(const std::vector<std::string>& values,
   PopScope("}");
 }
 
-void cmFastbuildFileWriter::Target::ComputeNames()
+cmFastbuildFileWriter::Library& cmFastbuildFileWriter::Target::MakeLibrary()
 {
-  int i = 0;
+  HasLibrary = true;
+  Library = {};
+  Library.Name = Name + "_" + "Library";
+  return Library;
+}
 
-  for (auto& element : PreBuildEvents)
-    element.Name = Name + std::to_string(i++);
+cmFastbuildFileWriter::ObjectList&
+cmFastbuildFileWriter::Target::MakeObjectList()
+{
+  ObjectLists.emplace_back();
+  auto& ol = ObjectLists.back();
+  ol.Alias = Name + "_ObjectList_" + std::to_string(ObjectLists.size() - 1);
+  return ol;
+}
 
-  for (auto& element : ObjectLists)
-    element.Alias = Name + std::to_string(i++);
+cmFastbuildFileWriter::Exec& cmFastbuildFileWriter::Target::MakePreBuildEvent()
+{
+  PreBuildEvents.emplace_back();
+  auto& e = PreBuildEvents.back();
+  e.Name = Name + "_PreBuildEvent_" + std::to_string(PreBuildEvents.size() - 1);
+  return e;
+}
 
-  for (auto& element : PreLinkEvents)
-    element.Name = Name + std::to_string(i++);
+cmFastbuildFileWriter::Exec& cmFastbuildFileWriter::Target::MakePreLinkEvent()
+{
+  PreLinkEvents.emplace_back();
+  auto& e = PreLinkEvents.back();
+  e.Name = Name + "_PreLinkEvent_" + std::to_string(PreLinkEvents.size() - 1);
+  return e;
+}
 
-  if (HasLibrary)
-    Library.Name = Name + std::to_string(i++);
-
-  for (auto& element : PostBuildEvents)
-    element.Name = Name + std::to_string(i++);
+cmFastbuildFileWriter::Exec&
+cmFastbuildFileWriter::Target::MakePostBuildEvent()
+{
+  PostBuildEvents.emplace_back();
+  auto& e = PostBuildEvents.back();
+  e.Name = Name + "_PostBuildEvent_" + std::to_string(PostBuildEvents.size() - 1);
+  return e;
 }
 
 void cmFastbuildFileWriter::Target::ComputeDummyOutputPaths(
@@ -272,6 +331,82 @@ void cmFastbuildFileWriter::Target::ComputeDummyOutputPaths(
 
 void cmFastbuildFileWriter::Target::ComputeInternalDependencies()
 {
+	// Library depends on all object lists
+  if (HasLibrary && !ObjectLists.empty()) {
+    for (const auto& ol : ObjectLists) {
+      Library.Libraries.push_back(ol.Alias);
+    }
+  }
+
+  // All events depend on the previous events within the same group
+  auto setupInternalEventDependencies = [](std::vector<Exec>& events) {
+    for (size_t i = 1; i < events.size(); ++i) {
+      events[i].PreBuildDependencies.push_back(events[i - 1].Name);
+    }
+  };
+  setupInternalEventDependencies(PreBuildEvents);
+  setupInternalEventDependencies(PreLinkEvents);
+  setupInternalEventDependencies(PostBuildEvents);
+
+  // All ObjectLists depend on the last pre-build event
+  if (!PreBuildEvents.empty()) {
+    for (auto& ol : ObjectLists)
+      ol.PreBuildDependencies.push_back(PreBuildEvents.back().Name);
+  }
+
+  // Setup dependencies for the pre-link events. Note that we only need to set
+  // this up for the first event, since all following events are internally
+  // dependent.
+  if (!PreLinkEvents.empty()) {
+    if (!ObjectLists.empty()) {
+      // We have object lists, let the first pre-link event depend on all of
+      // them
+      for (const auto& ol : ObjectLists) {
+        PreLinkEvents.front().PreBuildDependencies.push_back(ol.Alias);
+      }
+    } else if (!PreBuildEvents.empty()) {
+      // We don't have object lists, but we do have pre-build events. Let the
+      // first pre-link event depend on the last pre-build event.
+      PreLinkEvents.front().PreBuildDependencies.push_back(
+        PreBuildEvents.back().Name);
+    }
+  }
+
+  // Note: Library automatically depends on object lists in fasbuild
+
+  // If we don't have any post-build events, we're done already
+  if (PostBuildEvents.empty())
+    return;
+
+  // Try to depend on the library
+  if (HasLibrary) {
+    PostBuildEvents.front().PreBuildDependencies.push_back(Library.Name);
+    return;
+  }
+
+  // Try to depend on the last pre-link event
+  if (!PreLinkEvents.empty()) {
+    PostBuildEvents.front().PreBuildDependencies.push_back(
+      PreLinkEvents.back().Name);
+    return;
+  }
+
+  // Try to depend on all object lists
+  if (!ObjectLists.empty()) {
+    for (const auto& ol : ObjectLists)
+      PostBuildEvents.front().PreBuildDependencies.push_back(ol.Alias);
+    return;
+  }
+
+  // Try to depend on the last pre-build event
+  if (!PreBuildEvents.empty()) {
+    PostBuildEvents.front().PreBuildDependencies.push_back(
+      PreBuildEvents.back().Name);
+    return;
+  }
+
+  // Nothing else to depend on, we must contain exclusively a post-build event
+  // and nothing else
 }
 
 std::string cmFastbuildFileWriter::Target::GetLastExecutedAlias() const

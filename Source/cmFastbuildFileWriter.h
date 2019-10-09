@@ -79,7 +79,7 @@ public:
   {
     std::string Name;
 
-    bool StaticLink = true;
+    std::string Type;
 
     //! Linker executable to use
     std::string Linker;
@@ -90,29 +90,61 @@ public:
     //! Options to pass to linker
     std::string LinkerOptions;
 
-    //! Libraries to link into executable
+    //! Libraries to link into the binary. Can be other targets.
     std::vector<std::string> Libraries;
 
     //! (optional) Force targets to be built before this
     std::vector<std::string> PreBuildDependencies;
+
+	//! Dummy compiler
+	std::string DummyCompiler;
   };
 
   struct Target
   {
-    std::string Name;
+    explicit Target(const std::string& name)
+      : Name(name)
+    {
+    }
 
-    std::vector<ObjectList> ObjectLists;
-    Library Library;
-    bool HasLibrary = false;
+    const Library& GetLibrary() const { return Library; }
 
-    std::vector<Exec> PreBuildEvents;
-    std::vector<Exec> PreLinkEvents;
-    std::vector<Exec> PostBuildEvents;
+    const std::vector<ObjectList> GetObjectLists() const
+    {
+      return ObjectLists;
+    }
 
-    void ComputeNames();
+    const std::vector<Exec> GetPreBuildEvents() const
+    {
+      return PreBuildEvents;
+    }
+
+    const std::vector<Exec> GetPreLinkEvents() const { return PreLinkEvents; }
+
+    const std::vector<Exec> GetPostBuildEvents() const
+    {
+      return PostBuildEvents;
+    }
+
+    Library& MakeLibrary();
+    ObjectList& MakeObjectList();
+    Exec& MakePreBuildEvent();
+    Exec& MakePreLinkEvent();
+    Exec& MakePostBuildEvent();
+
     void ComputeDummyOutputPaths(const std::string& root);
     void ComputeInternalDependencies();
     std::string GetLastExecutedAlias() const;
+
+    std::string Name;
+    bool HasLibrary = false;
+
+  private:
+    std::vector<ObjectList> ObjectLists;
+    Library Library;
+    std::vector<Exec> PreBuildEvents;
+    std::vector<Exec> PreLinkEvents;
+    std::vector<Exec> PostBuildEvents;
   };
 
   static void GenerateBuildScript(const std::string& filePrefix,
@@ -134,6 +166,12 @@ public:
   void Write(const Exec& exec);
   void WriteVariable(const std::string& name,
                      const std::string& string_literal_argument,
+                     bool convertPaths = false)
+  {
+    WriteVariable(name, string_literal_argument.c_str(), convertPaths);
+  }
+  void WriteVariable(const std::string& name,
+                     const char *string_literal_argument,
                      bool convertPaths = false);
   void WriteVariable(const std::string& name, bool boolean_literal);
   void PushFunctionCall(const std::string& function,

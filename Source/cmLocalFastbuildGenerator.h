@@ -23,7 +23,6 @@ public:
   void ComputeObjectFilenames(
     std::map<cmSourceFile const*, std::string>& mapping,
     cmGeneratorTarget const* gt) override;
-  cmRulePlaceholderExpander* CreateRulePlaceholderExpander() const override;
   void Generate() override;
   std::string GetTargetDirectory(
     cmGeneratorTarget const* target) const override;
