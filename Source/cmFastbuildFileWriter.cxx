@@ -311,6 +311,25 @@ cmFastbuildFileWriter::Target::MakePostBuildEvent()
   return e;
 }
 
+cmFastbuildFileWriter::Alias cmFastbuildFileWriter::Target::MakeAlias() const
+{
+  Alias alias;
+  alias.Name = Name;
+
+  for (const auto& x : PreBuildEvents)
+    alias.Targets.push_back(x.Name);
+  for (const auto& x : ObjectLists)
+    alias.Targets.push_back(x.Alias);
+  for (const auto& x : PreLinkEvents)
+    alias.Targets.push_back(x.Name);
+  if (HasLibrary)
+    alias.Targets.push_back(Library.Name);
+  for (const auto& x : PostBuildEvents)
+    alias.Targets.push_back(x.Name);
+
+  return alias;
+}
+
 void cmFastbuildFileWriter::Target::ComputeDummyOutputPaths(
   const std::string& root)
 {
@@ -331,7 +350,7 @@ void cmFastbuildFileWriter::Target::ComputeDummyOutputPaths(
 
 void cmFastbuildFileWriter::Target::ComputeInternalDependencies()
 {
-	// Library depends on all object lists
+  // Library depends on all object lists
   if (HasLibrary && !ObjectLists.empty()) {
     for (const auto& ol : ObjectLists) {
       Library.Libraries.push_back(ol.Alias);
@@ -372,7 +391,11 @@ void cmFastbuildFileWriter::Target::ComputeInternalDependencies()
     }
   }
 
-  // Note: Library automatically depends on object lists in fasbuild
+  // Note: Library automatically depends on object lists in fasbuild, but we
+  // need to setup the dependency on pre-link events
+  if (HasLibrary && !PreLinkEvents.empty()) {
+    Library.PreBuildDependencies.push_back(PreLinkEvents.back().Name);
+  }
 
   // If we don't have any post-build events, we're done already
   if (PostBuildEvents.empty())

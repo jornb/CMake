@@ -132,6 +132,8 @@ public:
     Exec& MakePreLinkEvent();
     Exec& MakePostBuildEvent();
 
+	Alias MakeAlias() const;
+
     void ComputeDummyOutputPaths(const std::string& root);
     void ComputeInternalDependencies();
     std::string GetLastExecutedAlias() const;

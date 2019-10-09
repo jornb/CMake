@@ -401,17 +401,28 @@ void InitializeCustomCommands(cmFastbuildFileWriter::Exec& exec,
                                              exec, command);
 }
 
-std::vector<cmFastbuildFileWriter::Target> CreateFastbuildTargets(
-  cmMakefile* makefile, const std::set<cmGeneratorTarget*>& targets)
+void CreateFastbuildTargets(
+  cmMakefile* makefile, const std::set<cmGeneratorTarget*>& targets,
+  std::vector<cmFastbuildFileWriter::Target>& fastbuildTargets,
+  std::vector<cmFastbuildFileWriter::Alias>& fastbuildAliases)
 {
-  std::vector<cmFastbuildFileWriter::Target> fastbuildTargets;
-
   // Get all configurations
   std::vector<std::string> configs;
   makefile->GetConfigurations(configs, false);
 
+  // Accumulate 'all' alias
+  cmFastbuildFileWriter::Alias allAlias;
+  allAlias.Name = "all";
+
   // Write object file list for each language and each configuration
   for (const auto& config : configs) {
+    // Make alias for configuration
+    cmFastbuildFileWriter::Alias configAlias;
+    configAlias.Name = config;
+
+	// Append config alias to 'all'
+	allAlias.Targets.push_back(configAlias.Name);
+
     for (const auto& target : targets) {
       auto targetType = target->GetType();
 
@@ -458,10 +469,16 @@ std::vector<cmFastbuildFileWriter::Target> CreateFastbuildTargets(
       fbTarget.ComputeInternalDependencies();
 
       fastbuildTargets.push_back(fbTarget);
+
+      auto fbAlias = fbTarget.MakeAlias();
+      fastbuildAliases.push_back(fbAlias);
+      configAlias.Targets.push_back(fbAlias.Name);
     }
+
+    fastbuildAliases.push_back(configAlias);
   }
 
-  return fastbuildTargets;
+  fastbuildAliases.push_back(allAlias);
 }
 
 cmGlobalFastbuildGenerator::cmGlobalFastbuildGenerator(cmake* cm)
@@ -618,7 +635,11 @@ void cmGlobalFastbuildGenerator::GenerateBffTargetSection(
 {
   file.WriteSingleLineComment("Targets");
 
-  auto fastbuildTargets = CreateFastbuildTargets(makefile, targets);
+  std::vector<cmFastbuildFileWriter::Target> fastbuildTargets;
+  std::vector<cmFastbuildFileWriter::Alias> fastbuildAliases;
+
+  CreateFastbuildTargets(makefile, targets, fastbuildTargets,
+                         fastbuildAliases);
 
   // TODO: Sort
   // TODO: Resolve dependencies
@@ -652,6 +673,11 @@ void cmGlobalFastbuildGenerator::GenerateBffTargetSection(
       file.Write(element);
     }
   }
+
+  // Write aliases
+  file.WriteSingleLineComment("Aliases");
+  for (const auto& alias : fastbuildAliases)
+    file.Write(alias);
 
   // // TODO: Should sort
   // for (const auto& target : targets) {
