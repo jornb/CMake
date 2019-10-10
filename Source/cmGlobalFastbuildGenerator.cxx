@@ -619,12 +619,47 @@ std::vector<cmGlobalGenerator::GeneratedMakeCommand>
 cmGlobalFastbuildGenerator::GenerateBuildCommand(
   const std::string& makeProgram, const std::string& projectName,
   const std::string& projectDir, std::vector<std::string> const& targetNames,
-  const std::string& config, bool fast, int jobs, bool verbose,
+  const std::string& config_, bool fast, int jobs, bool verbose,
   std::vector<std::string> const& makeOptions)
 {
-  // TODO
+  cmGlobalGenerator::GeneratedMakeCommand command;
 
-  return {};
+  // Copy the targets and config so we can modify the vector
+  auto targets = targetNames;
+  auto config = config_;
+
+  // Default to debug build
+  if (config.empty())
+    config = "Debug";
+
+  // Select the caller- or user-preferred make program, e.g. fastbuild.exe
+  command.Add(this->SelectMakeProgram(makeProgram));
+
+  // Add nice-to-have flags
+  command.Add("-summary");
+
+  // Turn the "clean" target into a -clean flag, which will perform a clean
+  // build. Note that this won't explicitly clean all output files.
+  auto it = std::find(std::begin(targets), std::end(targets), "clean");
+  if (it != std::end(targets)) {
+    command.Add("-clean");
+
+    // Remove the "clean" target from the target list, since it is not actually
+    // a target, just a placeholder name
+    targets.erase(it);
+  }
+
+  if (targets.empty()) {
+    // If we don't have any targets to build, we'll build the config alias
+    command.Add(config);
+  } else {
+    // Append the config-specific alias for each target
+    for (const auto& target : targets) {
+      command.Add(target + "_" + config);
+    }
+  }
+
+  return { command };
 }
 
 const char* cmGlobalFastbuildGenerator::GetCMakeCFGIntDir() const
