@@ -566,13 +566,24 @@ void cmGlobalFastbuildGenerator::AppendDirectoryForConfig(
   const std::string& prefix, const std::string& config,
   const std::string& suffix, std::string& dir)
 {
-  // TODO
+  // Note: Same implementation as
+  // cmGlobalVisualStudio7Generator::AppendDirectoryForConfig
+  if (!config.empty()) {
+    dir += prefix;
+    dir += config;
+    dir += suffix;
+  }
 }
 
 void cmGlobalFastbuildGenerator::ComputeTargetObjectDirectory(
   cmGeneratorTarget* gt) const
 {
-  // TODO
+  // Compute full path to object file directory for this target.
+  // Note: Same implementation as
+  // cmGlobalNinjaGenerator::ComputeTargetObjectDirectory and others
+  gt->ObjectDirectory =
+    cmStrCat(gt->LocalGenerator->GetCurrentBinaryDirectory(), '/',
+             gt->LocalGenerator->GetTargetDirectory(gt), '/');
 }
 
 cmLinkLineComputer* cmGlobalFastbuildGenerator::CreateLinkLineComputer(
