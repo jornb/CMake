@@ -14,8 +14,6 @@
 #include "windows.h"
 #endif
 
-#define FASTBUILD_DOLLAR_TAG "FASTBUILD_DOLLAR_TAG"
-
 cmLocalFastbuildGenerator::cmLocalFastbuildGenerator(cmGlobalGenerator* gg,
                                                      cmMakefile* makefile)
   : cmLocalCommonGenerator(gg, makefile,
