@@ -6,7 +6,6 @@
 #include "cmCustomCommandGenerator.h"
 #include "cmDocumentationEntry.h"
 #include "cmFastbuildLinkLineComputer.h"
-#include "cmFastbuildTargetGenerator.h"
 #include "cmGeneratorTarget.h"
 #include "cmGlobalGenerator.h"
 #include "cmGlobalGeneratorFactory.h"
@@ -463,7 +462,7 @@ void InitializeCustomCommands(cmFastbuildFileWriter::Exec& exec,
 }
 
 void CreateFastbuildTargets(
-  cmMakefile* makefile, const std::set<cmGeneratorTarget*>& targets,
+  cmMakefile* makefile, const std::vector<cmGeneratorTarget*>& targets,
   std::vector<cmFastbuildFileWriter::Target>& fastbuildTargets,
   std::vector<cmFastbuildFileWriter::Alias>& fastbuildAliases)
 {
@@ -540,6 +539,68 @@ void CreateFastbuildTargets(
   }
 
   fastbuildAliases.push_back(allAlias);
+}
+
+std::vector<cmGeneratorTarget*> SortTargetsInDependencyOrder(
+  cmGlobalGenerator& globalGenerator,
+  std::vector<cmGeneratorTarget*> remainingUnsortedTargets)
+{
+  std::vector<cmGeneratorTarget*> sortedTargets;
+  sortedTargets.reserve(remainingUnsortedTargets.size());
+
+  // Helper method to check if a target has unsorted dependencies
+  auto allDependenciesAreSorted = [&](const cmGeneratorTarget& target) {
+    for (const cmGeneratorTarget* d :
+         globalGenerator.GetTargetDirectDepends(&target)) {
+
+      // If this dependency is already sorted, we're OK
+      if (std::find(sortedTargets.begin(), sortedTargets.end(), d) !=
+          sortedTargets.end())
+        continue;
+
+      // We didn't find sorted dependency. It might be because the dependency
+      // is not a target we care about at all, in which case it'll not be in
+      // remainingUnsortedTargets either
+      if (std::find(remainingUnsortedTargets.begin(),
+                    remainingUnsortedTargets.end(),
+                    d) == remainingUnsortedTargets.end())
+        continue;
+
+      return false;
+    }
+    return true;
+  };
+
+  while (!remainingUnsortedTargets.empty()) {
+    bool didSortTarget = false;
+
+    for (size_t i = 0; i < remainingUnsortedTargets.size(); ++i) {
+      if (allDependenciesAreSorted(*remainingUnsortedTargets[i])) {
+        // We're done with this target
+        sortedTargets.push_back(remainingUnsortedTargets[i]);
+
+        // Special case for when we just finished the last target
+        if (remainingUnsortedTargets.size() == 1)
+          return sortedTargets;
+
+        // To delete the current target without doing extra work, we simply
+        // swap it with the last item, then pop it
+        remainingUnsortedTargets[i] =
+          std::move(remainingUnsortedTargets.back());
+        remainingUnsortedTargets.pop_back();
+        i--; // We have to redo i since it is now the previously last element
+
+        didSortTarget = true;
+      }
+    }
+
+    if (!didSortTarget) {
+      throw std::runtime_error("Internal CMake error: Fastbuild generator "
+                               "found cyclic dependencies between targets");
+    }
+  }
+
+  return sortedTargets;
 }
 
 cmGlobalFastbuildGenerator::cmGlobalFastbuildGenerator(cmake* cm)
@@ -701,16 +762,20 @@ void cmGlobalFastbuildGenerator::GenerateBffFile()
   // Collect all targets
   auto targets = DetectTargetGenerators();
 
+  // Fastbuild requires all targets to be sorted in dependency order, meaning
+  // that it is not allowed in fastbuild to refer to a target which hasen't
+  // been defined yet.
+  //
+  // We therefore sort all targets based on their dependencies.
+  targets = SortTargetsInDependencyOrder(*this, targets);
+
   GenerateBffCompilerSection(file, root->GetMakefile(), targets);
-
-  // TODO: Sort the targets based on dependency order
-
   GenerateBffTargetSection(file, root->GetMakefile(), targets);
 }
 
 void cmGlobalFastbuildGenerator::GenerateBffCompilerSection(
   cmFastbuildFileWriter& file, cmMakefile* makefile,
-  const std::set<cmGeneratorTarget*>& targets) const
+  const std::vector<cmGeneratorTarget*>& targets) const
 {
   file.WriteSingleLineComment("Compilers");
 
@@ -738,7 +803,7 @@ void cmGlobalFastbuildGenerator::GenerateBffCompilerSection(
 
 void cmGlobalFastbuildGenerator::GenerateBffTargetSection(
   cmFastbuildFileWriter& file, cmMakefile* makefile,
-  const std::set<cmGeneratorTarget*>& targets) const
+  const std::vector<cmGeneratorTarget*>& targets) const
 {
   file.WriteSingleLineComment("Targets");
 
@@ -785,26 +850,12 @@ void cmGlobalFastbuildGenerator::GenerateBffTargetSection(
   file.WriteSingleLineComment("Aliases");
   for (const auto& alias : fastbuildAliases)
     file.Write(alias);
-
-  // // TODO: Should sort
-  // for (const auto& target : targets) {
-  //   // Skip interfaces
-  //   if (target->GetType() == cmStateEnums::EXECUTABLE ||
-  //       target->GetType() == cmStateEnums::SHARED_LIBRARY ||
-  //       target->GetType() == cmStateEnums::STATIC_LIBRARY ||
-  //       target->GetType() == cmStateEnums::MODULE_LIBRARY ||
-  //       target->GetType() == cmStateEnums::OBJECT_LIBRARY ||
-  //       target->GetType() == cmStateEnums::UTILITY ||
-  //       target->GetType() == cmStateEnums::GLOBAL_TARGET) {
-  //     cmFastbuildTargetGenerator{ file, target }.Generate();
-  //}
-  // }
 }
 
-std::set<cmGeneratorTarget*>
+std::vector<cmGeneratorTarget*>
 cmGlobalFastbuildGenerator::DetectTargetGenerators() const
 {
-  std::set<cmGeneratorTarget*> targets;
+  std::vector<cmGeneratorTarget*> targets;
 
   // Loop over each target in each generator in each project
   for (const auto& project : GetProjectMap()) {
@@ -822,7 +873,12 @@ cmGlobalFastbuildGenerator::DetectTargetGenerators() const
           continue;
         }
 
-        targets.insert(target);
+        if (std::find(targets.begin(), targets.end(), target) !=
+            targets.end()) {
+          continue;
+        }
+
+        targets.push_back(target);
       }
     }
   }
@@ -831,7 +887,7 @@ cmGlobalFastbuildGenerator::DetectTargetGenerators() const
 }
 
 std::set<std::string> fastbuild::detail::DetectTargetLanguages(
-  const std::set<cmGeneratorTarget*>& targets)
+  const std::vector<cmGeneratorTarget*>& targets)
 {
   std::set<std::string> languages;
 
