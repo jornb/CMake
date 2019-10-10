@@ -316,10 +316,76 @@ void SetLinkerInvocation(cmFastbuildFileWriter::Library& library,
   library.LinkerOptions = split.second;
 }
 
-cmFastbuildFileWriter::ObjectList InitializeObjectList(
-  cmFastbuildFileWriter::ObjectList& objectList, cmGeneratorTarget* target,
-  const TargetOutputFileNames& targetOutputNames, const std::string& config,
-  const std::string& language)
+void SetCompilerInvocation(cmFastbuildFileWriter::ObjectList& objectList,
+                          cmGeneratorTarget* target,
+                          const TargetOutputFileNames& outputNames,
+                          const std::string& config,
+                          const std::string& language,
+                          std::vector<const cmSourceFile*>& sourceFiles)
+{
+  auto localCommonGenerator =
+    static_cast<cmLocalCommonGenerator*>(target->LocalGenerator);
+
+  const auto& targetName = target->GetName();
+  const auto targetTypeStr = cmState::GetTargetTypeName(target->GetType());
+
+  auto defines = GetCompileDefines(localCommonGenerator, target, sourceFiles,
+                                   config, language);
+  auto flags = GetCompilerFlags(localCommonGenerator, target, sourceFiles,
+                                config, language);
+
+  std::string manifests;
+  target->GetManifests(sourceFiles, config);
+
+  cmRulePlaceholderExpander::RuleVariables vars;
+  vars.CMTargetName = targetName.c_str();
+  vars.CMTargetType = targetTypeStr;
+  vars.Language = language.c_str();
+  vars.Source = "\"%1\"";
+  vars.Object = "\"%2\"";
+  vars.ObjectDir = outputNames.compileOutputDir.c_str();
+  vars.ObjectFileDir = "";
+  vars.Flags = flags.c_str();
+  vars.Includes = "";
+  vars.Manifests = manifests.c_str();
+  vars.Defines = defines.c_str();
+  vars.TargetCompilePDB = outputNames.compileOutputPdb.c_str();
+
+  // Get all commands necessary to compile objects
+  std::string compileCmdVariable =
+    localCommonGenerator->GetMakefile()->GetRequiredDefinition(
+      "CMAKE_" + language + "_COMPILE_OBJECT");
+  std::vector<std::string> compileCmds;
+  cmExpandList(compileCmdVariable, compileCmds);
+
+  // We don't know how to handle more than one command
+  if (compileCmds.size() != 1) {
+    throw std::runtime_error("Internal CMake error: Fastbuild expected a "
+                             "single command for object compilation");
+  }
+  auto compileCommand = compileCmds[0];
+
+  // Create rule expander in a unique_ptr so it is ensured to be cleaned up
+  auto localFastbuildGenerator =
+    static_cast<cmLocalFastbuildGenerator*>(localCommonGenerator);
+  std::unique_ptr<cmRulePlaceholderExpander> rulePlaceholderExpander{
+    localFastbuildGenerator->CreateRulePlaceholderExpander()
+  };
+
+  // Expand the compile command
+  rulePlaceholderExpander->ExpandRuleVariables(localFastbuildGenerator,
+                                               compileCommand, vars);
+
+  auto split = SplitProgramAndArguments(compileCommand);
+  objectList.Compiler = split.first;
+  objectList.CompilerOptions = split.second;
+}
+
+void InitializeObjectList(cmFastbuildFileWriter::ObjectList& objectList,
+                          cmGeneratorTarget* target,
+                          const TargetOutputFileNames& targetOutputNames,
+                          const std::string& config,
+                          const std::string& language)
 {
   auto localCommonGenerator =
     static_cast<cmLocalCommonGenerator*>(target->LocalGenerator);
@@ -336,15 +402,10 @@ cmFastbuildFileWriter::ObjectList InitializeObjectList(
   std::string manifests;
   target->GetManifests(languageSourceFiles, config);
 
-  objectList.Compiler = "Compiler_" + language;
-  objectList.CompilerOptions;
   objectList.CompilerOutputPath = target->GetSupportDirectory() + "/" + config;
   objectList.CompilerInputFiles = sourceFiles;
-  objectList.CompilerOptions =
-    GetCompileArguments(target, languageSourceFiles, targetOutputNames,
-                        manifests, language, config);
-
-  return objectList;
+  SetCompilerInvocation(objectList, target, targetOutputNames, config,
+                        language, languageSourceFiles);
 }
 
 void InitializeLibrary(cmFastbuildFileWriter::Library& library,
