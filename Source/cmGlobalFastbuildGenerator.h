@@ -75,7 +75,8 @@ private:
     cmFastbuildFileWriter& file, cmMakefile* makefile,
     const std::vector<cmGeneratorTarget*>& targets) const;
   void GenerateBffTargetSection(
-    cmFastbuildFileWriter& file, cmMakefile* makefile,
+    cmGlobalGenerator& globalGenerator, cmFastbuildFileWriter& file,
+    cmMakefile* makefile,
     const std::vector<cmGeneratorTarget*>& targets) const;
 };
 

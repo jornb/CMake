@@ -47,6 +47,59 @@ void cmFastbuildFileWriter::GenerateBuildScript(
 // TODO
 #endif
 
+std::vector<std::string> GetLastExecutedDependencySet(
+  const cmFastbuildFileWriter::Target& target)
+{
+  if (!target.GetPostBuildEvents().empty())
+    return { target.GetPostBuildEvents().back().Name };
+
+  if (target.HasLibrary)
+    return { target.GetLibrary().Name };
+
+  if (!target.GetPreLinkEvents().empty())
+    return { target.GetPreLinkEvents().back().Name };
+
+  if (!target.GetObjectLists().empty()) {
+    std::vector<std::string> result;
+    for (const auto& ol : target.GetObjectLists()) {
+      result.push_back(ol.Alias);
+    }
+    return result;
+  }
+
+  if (!target.GetPreBuildEvents().empty())
+    return { target.GetPreBuildEvents().back().Name };
+
+  return {};
+}
+
+std::vector<std::vector<std::string>*> GetFirstExecutedPreBuildDependenciesSet(
+  cmFastbuildFileWriter::Target& target)
+{
+  if (!target.GetPreBuildEvents().empty()) {
+    return { &target.GetPreBuildEvents().front().PreBuildDependencies };
+  }
+
+  if (!target.GetObjectLists().empty()) {
+    std::vector<std::vector<std::string>*> result;
+    for (auto& ol : target.GetObjectLists()) {
+      result.push_back(&ol.PreBuildDependencies);
+    }
+    return result;
+  }
+
+  if (!target.GetPreLinkEvents().empty())
+    return { &target.GetPreLinkEvents().front().PreBuildDependencies };
+
+  if (target.HasLibrary)
+    return { &target.GetLibrary().PreBuildDependencies };
+
+  if (!target.GetPostBuildEvents().empty())
+    return { &target.GetPostBuildEvents().front().PreBuildDependencies };
+
+  return {};
+}
+
 cmFastbuildFileWriter::cmFastbuildFileWriter(const std::string& filename)
 {
   file.Open(filename);
@@ -131,7 +184,6 @@ void cmFastbuildFileWriter::Write(const Library& library)
     WriteVariable("CompilerOptions", "-c \"%1\" \"%2\"");
     WriteVariable("CompilerOutputPath", "/dummy/");
   } else {
-
     // Exe or DLL
     WriteVariable("Linker", library.Linker);
     WriteVariable("LinkerOptions", library.LinkerOptions);
@@ -290,7 +342,8 @@ cmFastbuildFileWriter::Exec& cmFastbuildFileWriter::Target::MakePreBuildEvent()
 {
   PreBuildEvents.emplace_back();
   auto& e = PreBuildEvents.back();
-  e.Name = Name + "_PreBuildEvent_" + std::to_string(PreBuildEvents.size() - 1);
+  e.Name =
+    Name + "_PreBuildEvent_" + std::to_string(PreBuildEvents.size() - 1);
   return e;
 }
 
@@ -307,7 +360,8 @@ cmFastbuildFileWriter::Target::MakePostBuildEvent()
 {
   PostBuildEvents.emplace_back();
   auto& e = PostBuildEvents.back();
-  e.Name = Name + "_PostBuildEvent_" + std::to_string(PostBuildEvents.size() - 1);
+  e.Name =
+    Name + "_PostBuildEvent_" + std::to_string(PostBuildEvents.size() - 1);
   return e;
 }
 
@@ -338,7 +392,7 @@ void cmFastbuildFileWriter::Target::ComputeDummyOutputPaths(
       if (element.ExecOutput.empty()) {
         element.ExecOutput = root + "/" + element.Name + ".txt";
         element.ExecUseStdOutAsOutput = true;
-        element.ExecAlways = true;
+        //element.ExecAlways = true;
       }
     }
   };
@@ -432,22 +486,37 @@ void cmFastbuildFileWriter::Target::ComputeInternalDependencies()
   // and nothing else
 }
 
-std::string cmFastbuildFileWriter::Target::GetLastExecutedAlias() const
+void cmFastbuildFileWriter::Target::AddDependency(const Target& dependency)
 {
-  if (!PostBuildEvents.empty())
-    return PostBuildEvents.back().Name;
+  // If we both have libraries, assume this is a link-level dependency.
+  // Note: We use .Libraries and not PreBuildDependencies so that Fastbuild
+  // will know to rebuild us when the dependency changes
+  if (HasLibrary && dependency.HasLibrary &&
+      !dependency.Library.LinkerDependencyOuptut.empty()) {
+    auto tmp = dependency.Library.LinkerDependencyOuptut;
+    cmSystemTools::ConvertToOutputSlashes(tmp);
+    Library.Libraries.push_back(tmp);
+  }
 
-  if (HasLibrary)
-    return Library.Name;
+  // Simple case of no build events, this is only a link-level dependency
+  if (!HasBuildEvents() && !dependency.HasBuildEvents()) {
+    return;
+  }
 
-  if (!PreLinkEvents.empty())
-    return PreLinkEvents.back().Name;
+  // If we have build events, we have a choice on whether to allow some
+  // processing, e.g. our object lists, while some build events are running.
+  //
+  // Because the build events could output or copy some files that we depend
+  // on, we will assume the pessimistic/conservative approach of always waiting
+  // for all build events of the dependency
+  //
+  // To do this, we add the last executed alias from the dependency to our
+  // first executed alias. Note that we must handle the case where we depend on
+  // an alias set, e.g. multiple objectlists, and not just a single alias.
 
-  if (!ObjectLists.empty())
-    return ObjectLists.back().Alias;
-
-  if (!PreBuildEvents.empty())
-    return PreBuildEvents.back().Name;
-
-  return "";
+  auto dependencies = GetLastExecutedDependencySet(dependency);
+  auto dependees = GetFirstExecutedPreBuildDependenciesSet(*this);
+  for (auto& dependee : dependees)
+    for (const auto& d : dependencies)
+      dependee->push_back(d);
 }

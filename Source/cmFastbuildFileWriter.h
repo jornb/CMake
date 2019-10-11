@@ -90,6 +90,12 @@ public:
     //! Options to pass to linker
     std::string LinkerOptions;
 
+	//! Output that dependent targets depend on.
+	//! For static libraries, this is the regular .lib file.
+	//! For dynamic libraries, this is the import .lib file.
+	//! For executables, this is empty.
+	std::string LinkerDependencyOuptut;
+
     //! Libraries to link into the binary. Can be other targets.
     std::vector<std::string> Libraries;
 
@@ -108,22 +114,30 @@ public:
     }
 
     const Library& GetLibrary() const { return Library; }
-
-    const std::vector<ObjectList> GetObjectLists() const
+    const std::vector<ObjectList>& GetObjectLists() const
     {
       return ObjectLists;
     }
-
-    const std::vector<Exec> GetPreBuildEvents() const
+    const std::vector<Exec>& GetPreBuildEvents() const
     {
       return PreBuildEvents;
     }
-
-    const std::vector<Exec> GetPreLinkEvents() const { return PreLinkEvents; }
-
-    const std::vector<Exec> GetPostBuildEvents() const
+    const std::vector<Exec>& GetPreLinkEvents() const { return PreLinkEvents; }
+    const std::vector<Exec>& GetPostBuildEvents() const
     {
       return PostBuildEvents;
+    }
+
+    Library& GetLibrary() { return Library; }
+    std::vector<ObjectList>& GetObjectLists() { return ObjectLists; }
+    std::vector<Exec>& GetPreBuildEvents() { return PreBuildEvents; }
+    std::vector<Exec>& GetPreLinkEvents() { return PreLinkEvents; }
+    std::vector<Exec>& GetPostBuildEvents() { return PostBuildEvents; }
+
+    bool HasBuildEvents() const
+    {
+      return !PreBuildEvents.empty() && !PreLinkEvents.empty() &&
+        !PostBuildEvents.empty();
     }
 
     Library& MakeLibrary();
@@ -132,11 +146,18 @@ public:
     Exec& MakePreLinkEvent();
     Exec& MakePostBuildEvent();
 
-	Alias MakeAlias() const;
+    Alias MakeAlias() const;
 
     void ComputeDummyOutputPaths(const std::string& root);
     void ComputeInternalDependencies();
-    std::string GetLastExecutedAlias() const;
+
+    //! \briefAdd a dependency between two targets. `this` depends on
+    //! `dependency`.
+    //!
+    //! Note that all dependencies between the libraries and object lists etc.
+    //! have already been accounted for. This method only updates the
+    //! `PreBuildDependencies` fields to ensure the build order is correct.
+    void AddDependency(const Target& dependency);
 
     std::string Name;
     bool HasLibrary = false;

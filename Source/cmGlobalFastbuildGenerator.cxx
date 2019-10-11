@@ -2,6 +2,8 @@
    file Copyright.txt or https://cmake.org/licensing for details.  */
 #include "cmGlobalFastbuildGenerator.h"
 
+#include <unordered_map>
+
 #include "cmComputeLinkInformation.h"
 #include "cmCustomCommandGenerator.h"
 #include "cmDocumentationEntry.h"
@@ -441,9 +443,11 @@ void InitializeLibrary(cmFastbuildFileWriter::Library& library,
       break;
     case cmStateEnums::STATIC_LIBRARY:
       library.Type = "Library";
+      library.LinkerDependencyOuptut = targetOutputNames.linkOutput;
       break;
     case cmStateEnums::SHARED_LIBRARY:
       library.Type = "DLL";
+      library.LinkerDependencyOuptut = targetOutputNames.linkOutputImplib;
       break;
   }
 
@@ -462,7 +466,8 @@ void InitializeCustomCommands(cmFastbuildFileWriter::Exec& exec,
 }
 
 void CreateFastbuildTargets(
-  cmMakefile* makefile, const std::vector<cmGeneratorTarget*>& targets,
+  cmGlobalGenerator& globalGenerator, cmMakefile* makefile,
+  const std::vector<cmGeneratorTarget*>& targets,
   std::vector<cmFastbuildFileWriter::Target>& fastbuildTargets,
   std::vector<cmFastbuildFileWriter::Alias>& fastbuildAliases)
 {
@@ -476,12 +481,16 @@ void CreateFastbuildTargets(
 
   // Write object file list for each language and each configuration
   for (const auto& config : configs) {
+    // Accumulate a map between cmGeneratorTarget and corresponding
+    // cmFastbuildFileWriter::Target index for this configuration
+    std::unordered_map<const cmGeneratorTarget*, size_t> targetMap;
+
     // Make alias for configuration
     cmFastbuildFileWriter::Alias configAlias;
     configAlias.Name = config;
 
-	// Append config alias to 'all'
-	allAlias.Targets.push_back(configAlias.Name);
+    // Append config alias to 'all'
+    allAlias.Targets.push_back(configAlias.Name);
 
     for (const auto& target : targets) {
       auto targetType = target->GetType();
@@ -528,7 +537,20 @@ void CreateFastbuildTargets(
       fbTarget.ComputeDummyOutputPaths(makefile->GetHomeOutputDirectory());
       fbTarget.ComputeInternalDependencies();
 
+      // Add dependencies between all targets of this configuration
+      // Note: It is safe to do this here, because the input targets are in
+      // dependency order, i.e. we will never depend on a target which we have
+      // not yet seen/processed.
+      for (const cmGeneratorTarget* d :
+           globalGenerator.GetTargetDirectDepends(target)) {
+
+        if (targetMap.count(d) > 0) {
+          fbTarget.AddDependency(fastbuildTargets[targetMap[d]]);
+        }
+      }
+
       fastbuildTargets.push_back(fbTarget);
+      targetMap[target] = fastbuildTargets.size() - 1;
 
       auto fbAlias = fbTarget.MakeAlias();
       fastbuildAliases.push_back(fbAlias);
@@ -770,7 +792,7 @@ void cmGlobalFastbuildGenerator::GenerateBffFile()
   targets = SortTargetsInDependencyOrder(*this, targets);
 
   GenerateBffCompilerSection(file, root->GetMakefile(), targets);
-  GenerateBffTargetSection(file, root->GetMakefile(), targets);
+  GenerateBffTargetSection(*this, file, root->GetMakefile(), targets);
 }
 
 void cmGlobalFastbuildGenerator::GenerateBffCompilerSection(
@@ -802,15 +824,15 @@ void cmGlobalFastbuildGenerator::GenerateBffCompilerSection(
 }
 
 void cmGlobalFastbuildGenerator::GenerateBffTargetSection(
-  cmFastbuildFileWriter& file, cmMakefile* makefile,
-  const std::vector<cmGeneratorTarget*>& targets) const
+  cmGlobalGenerator & globalGenerator, cmFastbuildFileWriter & file,
+  cmMakefile * makefile, const std::vector<cmGeneratorTarget*>& targets) const
 {
   file.WriteSingleLineComment("Targets");
 
   std::vector<cmFastbuildFileWriter::Target> fastbuildTargets;
   std::vector<cmFastbuildFileWriter::Alias> fastbuildAliases;
 
-  CreateFastbuildTargets(makefile, targets, fastbuildTargets,
+  CreateFastbuildTargets(globalGenerator, makefile, targets, fastbuildTargets,
                          fastbuildAliases);
 
   // TODO: Sort
