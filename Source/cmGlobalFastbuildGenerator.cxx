@@ -9,12 +9,47 @@
 #include "cmDocumentationEntry.h"
 #include "cmFastbuildLinkLineComputer.h"
 #include "cmGeneratorTarget.h"
+#include "cmCommonTargetGenerator.h"
 #include "cmGlobalGenerator.h"
 #include "cmGlobalGeneratorFactory.h"
 #include "cmLocalGenerator.h"
 #include "cmSourceFile.h"
 #include "cmState.h"
 #include "cmake.h"
+
+void EnsureDirectoryExists(const std::string& path,
+                           const std::string& homeOutputDirectory)
+{
+  if (cmSystemTools::FileIsFullPath(path.c_str())) {
+    cmSystemTools::MakeDirectory(path.c_str());
+  } else {
+    const std::string fullPath = homeOutputDirectory + "/" + path;
+    cmSystemTools::MakeDirectory(fullPath.c_str());
+  }
+}
+
+std::string GetManifests(cmGeneratorTarget* target,
+                         const std::vector<const cmSourceFile*> sourceFiles,
+                         const std::string& config)
+{
+  auto localCommonGenerator =
+    static_cast<cmLocalCommonGenerator*>(target->LocalGenerator);
+
+  std::vector<cmSourceFile const*> manifest_srcs;
+  target->GetManifests(manifest_srcs, config);
+
+  std::vector<std::string> manifests;
+  manifests.reserve(manifest_srcs.size());
+  for (cmSourceFile const* manifest_src : manifest_srcs) {
+    manifests.push_back(localCommonGenerator->ConvertToOutputFormat(
+      localCommonGenerator->MaybeConvertToRelativePath(
+        localCommonGenerator->GetWorkingDirectory(),
+        manifest_src->GetFullPath()),
+      cmOutputConverter::SHELL));
+  }
+
+  return cmJoin(manifests, " ");
+}
 
 std::pair<std::string, std::string> SplitProgramAndArguments(
   const std::string& command)
@@ -335,8 +370,7 @@ void SetCompilerInvocation(cmFastbuildFileWriter::ObjectList& objectList,
   auto flags = GetCompilerFlags(localCommonGenerator, target, sourceFiles,
                                 config, language);
 
-  std::string manifests;
-  target->GetManifests(sourceFiles, config);
+  std::string manifests = GetManifests(target, sourceFiles, config);
 
   cmRulePlaceholderExpander::RuleVariables vars;
   vars.CMTargetName = targetName.c_str();
@@ -400,9 +434,6 @@ void InitializeObjectList(cmFastbuildFileWriter::ObjectList& objectList,
     sourceFiles.push_back(sourceFile.Value->GetLocation().GetFullPath());
   }
 
-  std::string manifests;
-  target->GetManifests(languageSourceFiles, config);
-
   objectList.CompilerOutputPath = target->GetSupportDirectory() + "/" + config;
   objectList.CompilerInputFiles = sourceFiles;
   SetCompilerInvocation(objectList, target, targetOutputNames, config,
@@ -430,8 +461,7 @@ void InitializeLibrary(cmFastbuildFileWriter::Library& library,
     sourceFiles.push_back(sf.Value);
   }
 
-  std::string manifests;
-  target->GetManifests(sourceFiles, config);
+  std::string manifests = GetManifests(target, sourceFiles, config);
 
   library.Linker = "Linker_" + language;
   library.LinkerOutput = targetOutputNames.linkOutput;
@@ -502,6 +532,34 @@ void CreateFastbuildTargets(
       // Handle "regular" code (executable, library, module, object library)
       if (targetType < cmStateEnums::UTILITY) {
         auto targetOutputNames = ComputeTargetOutputFileNames(*target, config);
+
+        // We have to ensure that output directories exists.
+        // For instance, Visual Studio is unable to ouptut files if the
+        // directory does not exist already, leading to some really
+        // hard-to-debug errors and bad error messages
+        if (!targetOutputNames.compileOutputDir.empty()) {
+          EnsureDirectoryExists(targetOutputNames.compileOutputDir,
+                                makefile->GetHomeOutputDirectory());
+        }
+        if (!targetOutputNames.compileOutputPdb.empty()) {
+          EnsureDirectoryExists(cmSystemTools::GetParentDirectory(
+                                  targetOutputNames.compileOutputPdb),
+                                makefile->GetHomeOutputDirectory());
+        }
+        if (!targetOutputNames.linkOutputImplib.empty()) {
+          EnsureDirectoryExists(targetOutputNames.linkOutputImplib,
+                                makefile->GetHomeOutputDirectory());
+        }
+        if (!targetOutputNames.linkOutputPdb.empty()) {
+          EnsureDirectoryExists(
+            cmSystemTools::GetParentDirectory(targetOutputNames.linkOutputPdb),
+            makefile->GetHomeOutputDirectory());
+        }
+        if (!targetOutputNames.linkOutput.empty()) {
+          EnsureDirectoryExists(
+            cmSystemTools::GetParentDirectory(targetOutputNames.linkOutput),
+            makefile->GetHomeOutputDirectory());
+        }
 
         // Get all languages (e.g. CXX and or C) in target
         auto languages = fastbuild::detail::DetectTargetLanguages({ target });
