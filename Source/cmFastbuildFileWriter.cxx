@@ -493,9 +493,19 @@ void cmFastbuildFileWriter::Target::AddDependency(const Target& dependency)
   // will know to rebuild us when the dependency changes
   if (HasLibrary && dependency.HasLibrary &&
       !dependency.Library.LinkerDependencyOuptut.empty()) {
+
+    // Add a dependency on the linker dependency output
     auto tmp = dependency.Library.LinkerDependencyOuptut;
     cmSystemTools::ConvertToOutputSlashes(tmp);
     Library.Libraries.push_back(tmp);
+
+    // If the dependency is a DLL, the LinkerDependencyOuptut will be the
+    // implib .lib file. In this case, we must also ensure that the build order
+    // is correct
+    if (dependency.Library.LinkerDependencyOuptut !=
+        dependency.Library.LinkerOutput) {
+      Library.PreBuildDependencies.push_back(dependency.Library.Name);
+    }
   }
 
   // Simple case of no build events, this is only a link-level dependency
