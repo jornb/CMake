@@ -554,7 +554,11 @@ void CreateFastbuildTargets(
 
       auto fbAlias = fbTarget.MakeAlias();
       fastbuildAliases.push_back(fbAlias);
-      configAlias.Targets.push_back(fbAlias.Name);
+
+      // Add all targets, except global ones (e.g. install/run_tests), which
+      // have to be run explicitly
+      if (targetType != cmStateEnums::GLOBAL_TARGET)
+        configAlias.Targets.push_back(fbAlias.Name);
     }
 
     fastbuildAliases.push_back(configAlias);
@@ -759,7 +763,8 @@ cmGlobalFastbuildGenerator::GenerateBuildCommand(
 const char* cmGlobalFastbuildGenerator::GetCMakeCFGIntDir() const
 {
   // TODO
-  return "FASTBUILD_CONFIG_INT_DIR";
+  //return "FASTBUILD_CONFIG_INT_DIR";
+  return ".";
 }
 
 std::string cmGlobalFastbuildGenerator::ConvertToFastbuildPath(
