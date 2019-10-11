@@ -495,14 +495,14 @@ void CreateFastbuildTargets(
     for (const auto& target : targets) {
       auto targetType = target->GetType();
 
-      auto targetOutputNames = ComputeTargetOutputFileNames(*target, config);
-
       // Initialize target
       cmFastbuildFileWriter::Target fbTarget{ target->GetName() + "_" +
                                               config };
 
       // Handle "regular" code (executable, library, module, object library)
       if (targetType < cmStateEnums::UTILITY) {
+        auto targetOutputNames = ComputeTargetOutputFileNames(*target, config);
+
         // Get all languages (e.g. CXX and or C) in target
         auto languages = fastbuild::detail::DetectTargetLanguages({ target });
 
