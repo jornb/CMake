@@ -895,9 +895,20 @@ cmGlobalFastbuildGenerator::DetectTargetGenerators() const
           continue;
         }
 
+        // Don't insert more than once
         if (std::find(targets.begin(), targets.end(), target) !=
             targets.end()) {
           continue;
+        }
+
+        if (target->GetType() == cmStateEnums::GLOBAL_TARGET) {
+          // We only want to process global targets that live in the home
+          // (i.e. top-level) directory.  CMake creates copies of these targets
+          // in every directory, which we don't need.
+          cmMakefile* mf = target->Target->GetMakefile();
+          if (mf->GetCurrentSourceDirectory() != mf->GetHomeDirectory()) {
+            continue;
+          }
         }
 
         targets.push_back(target);
