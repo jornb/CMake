@@ -4,12 +4,12 @@
 
 #include <unordered_map>
 
+#include "cmCommonTargetGenerator.h"
 #include "cmComputeLinkInformation.h"
 #include "cmCustomCommandGenerator.h"
 #include "cmDocumentationEntry.h"
 #include "cmFastbuildLinkLineComputer.h"
 #include "cmGeneratorTarget.h"
-#include "cmCommonTargetGenerator.h"
 #include "cmGlobalGenerator.h"
 #include "cmGlobalGeneratorFactory.h"
 #include "cmLocalGenerator.h"
@@ -94,6 +94,22 @@ TargetOutputFileNames ComputeTargetOutputFileNames(
   TargetOutputFileNames output;
   output.compileOutputDir = target.GetDirectory(config);
   output.compileOutputPdb = target.GetCompilePDBPath(config);
+
+  // Forcefully append target name to compile output directories, to ensure we
+  // don't clash manifests when linking several executables that all require
+  // the same objects
+  //
+  // TODO: Find a nicer way
+  if (!output.compileOutputDir.empty()) {
+    output.compileOutputDir += "/" + target.GetName();
+  }
+
+  if (!output.compileOutputPdb.empty()) {
+    output.compileOutputPdb =
+      cmSystemTools::GetParentDirectory(output.compileOutputPdb) + "/" +
+      target.GetName() + "/" +
+      cmSystemTools::GetFilenameName(output.compileOutputPdb);
+  }
 
   output.linkOutput = target.GetFullPath(
     config, cmStateEnums::ArtifactType::RuntimeBinaryArtifact, true);
@@ -353,11 +369,11 @@ void SetLinkerInvocation(cmFastbuildFileWriter::Library& library,
 }
 
 void SetCompilerInvocation(cmFastbuildFileWriter::ObjectList& objectList,
-                          cmGeneratorTarget* target,
-                          const TargetOutputFileNames& outputNames,
-                          const std::string& config,
-                          const std::string& language,
-                          std::vector<const cmSourceFile*>& sourceFiles)
+                           cmGeneratorTarget* target,
+                           const TargetOutputFileNames& outputNames,
+                           const std::string& config,
+                           const std::string& language,
+                           std::vector<const cmSourceFile*>& sourceFiles)
 {
   auto localCommonGenerator =
     static_cast<cmLocalCommonGenerator*>(target->LocalGenerator);
@@ -488,11 +504,12 @@ void InitializeLibrary(cmFastbuildFileWriter::Library& library,
 
 void InitializeCustomCommands(cmFastbuildFileWriter::Exec& exec,
                               const std::string& scriptFilenamePrefix,
-                              const cmCustomCommand& command)
+                              const cmCustomCommand& command,
+                              const std::string& args_replace)
 {
   exec.ExecWorkingDir = command.GetWorkingDirectory();
   cmFastbuildFileWriter::GenerateBuildScript(scriptFilenamePrefix + exec.Name,
-                                             exec, command);
+                                             exec, command, args_replace);
 }
 
 void CreateFastbuildTargets(
@@ -547,7 +564,8 @@ void CreateFastbuildTargets(
                                 makefile->GetHomeOutputDirectory());
         }
         if (!targetOutputNames.linkOutputImplib.empty()) {
-          EnsureDirectoryExists(targetOutputNames.linkOutputImplib,
+          EnsureDirectoryExists(cmSystemTools::GetParentDirectory(
+                                  targetOutputNames.linkOutputImplib),
                                 makefile->GetHomeOutputDirectory());
         }
         if (!targetOutputNames.linkOutputPdb.empty()) {
@@ -578,19 +596,26 @@ void CreateFastbuildTargets(
         }
       }
 
+      // Hack for fixing missing configuration for CTest $(ARGS)
+      std::string build_command_args_replace;
+      if (targetType == cmStateEnums::GLOBAL_TARGET &&
+          cmSystemTools::UpperCase(target->GetName()) == "RUN_TESTS") {
+        build_command_args_replace = "-C " + config;
+      }
+
       // Add build events
       for (const auto& cmd : target->GetPreBuildCommands())
         InitializeCustomCommands(fbTarget.MakePreBuildEvent(),
-                                 makefile->GetHomeOutputDirectory() + "/",
-                                 cmd);
+                                 makefile->GetHomeOutputDirectory() + "/", cmd,
+                                 build_command_args_replace);
       for (const auto& cmd : target->GetPreLinkCommands())
         InitializeCustomCommands(fbTarget.MakePreLinkEvent(),
-                                 makefile->GetHomeOutputDirectory() + "/",
-                                 cmd);
+                                 makefile->GetHomeOutputDirectory() + "/", cmd,
+                                 build_command_args_replace);
       for (const auto& cmd : target->GetPostBuildCommands())
         InitializeCustomCommands(fbTarget.MakePostBuildEvent(),
-                                 makefile->GetHomeOutputDirectory() + "/",
-                                 cmd);
+                                 makefile->GetHomeOutputDirectory() + "/", cmd,
+                                 build_command_args_replace);
 
       fbTarget.ComputeDummyOutputPaths(makefile->GetHomeOutputDirectory());
       fbTarget.ComputeInternalDependencies();
@@ -887,8 +912,8 @@ void cmGlobalFastbuildGenerator::GenerateBffCompilerSection(
 }
 
 void cmGlobalFastbuildGenerator::GenerateBffTargetSection(
-  cmGlobalGenerator & globalGenerator, cmFastbuildFileWriter & file,
-  cmMakefile * makefile, const std::vector<cmGeneratorTarget*>& targets) const
+  cmGlobalGenerator& globalGenerator, cmFastbuildFileWriter& file,
+  cmMakefile* makefile, const std::vector<cmGeneratorTarget*>& targets) const
 {
   file.WriteSingleLineComment("Targets");
 

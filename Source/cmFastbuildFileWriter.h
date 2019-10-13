@@ -172,7 +172,8 @@ public:
 
   static void GenerateBuildScript(const std::string& filePrefix,
                                   cmFastbuildFileWriter::Exec& exec,
-                                  const cmCustomCommand& command);
+                                  const cmCustomCommand& command,
+                                  const std::string& args_replace = "");
 
 public:
   /** Opens a file for writing at the given path. */

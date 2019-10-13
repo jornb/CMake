@@ -9,7 +9,7 @@
 #ifdef _WIN32
 void cmFastbuildFileWriter::GenerateBuildScript(
   const std::string& filePrefix, cmFastbuildFileWriter::Exec& exec,
-  const cmCustomCommand& command)
+  const cmCustomCommand& command, const std::string &args_replace)
 {
   auto filename = filePrefix + ".bat";
 
@@ -26,7 +26,11 @@ void cmFastbuildFileWriter::GenerateBuildScript(
     file << "setlocal\n";
     for (const auto& cmd : command.GetCommandLines()) {
       for (const auto& arg : cmd) {
-        file << arg << " ";
+        if (args_replace.empty() || arg != "$(ARGS)") {
+          file << arg << " ";
+        } else {
+          file << args_replace << " ";
+        }
       }
       file << "\n";
       file << "if %errorlevel% neq 0 goto :end\n";
