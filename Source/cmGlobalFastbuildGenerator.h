@@ -71,13 +71,6 @@ private:
   std::vector<cmGeneratorTarget*> DetectTargetGenerators() const;
 
   void GenerateBffFile();
-  std::vector<cmFastbuildFileWriter::Compiler> GenerateBffCompilerSection(
-    cmFastbuildFileWriter& file, cmMakefile* makefile,
-    const std::vector<cmGeneratorTarget*>& targets) const;
-  void GenerateBffTargetSection(
-    cmGlobalGenerator& globalGenerator, cmFastbuildFileWriter& file,
-    cmMakefile* makefile, const std::vector<cmGeneratorTarget*>& targets,
-    const std::vector<cmFastbuildFileWriter::Compiler>& compilers) const;
 };
 
 #endif

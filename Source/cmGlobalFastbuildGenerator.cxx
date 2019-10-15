@@ -734,6 +734,93 @@ std::vector<cmGeneratorTarget*> SortTargetsInDependencyOrder(
   return sortedTargets;
 }
 
+std::vector<cmFastbuildFileWriter::Compiler> GenerateBffCompilerSection(
+  cmFastbuildFileWriter& file, cmMakefile* makefile,
+  const std::vector<cmGeneratorTarget*>& targets)
+{
+  std::vector<cmFastbuildFileWriter::Compiler> compilers;
+  file.WriteSingleLineComment("Compilers");
+
+  // Output compiler for each language
+  std::vector<std::string> compiler_languages;
+  for (const auto& language :
+       fastbuild::detail::DetectTargetLanguages(targets)) {
+    // Get the root location of the compiler
+    std::string variableString = "CMAKE_" + language + "_COMPILER";
+    std::string executable = makefile->GetSafeDefinition(variableString);
+    if (executable.empty()) {
+      continue;
+    }
+
+    // Remember language for later
+    compiler_languages.push_back(language);
+
+    // Output compiler definition
+    cmFastbuildFileWriter::Compiler compiler;
+    compiler.Executable = executable;
+    compiler.Name = "Compiler_" + language;
+    if (cmSystemTools::UpperCase(language) == "RC") {
+      compiler.CompilerFamily = "custom";
+    }
+    compilers.push_back(compiler);
+    file.Write(compiler);
+  }
+
+  return compilers;
+}
+
+void GenerateBffTargetSection(
+  cmGlobalGenerator& globalGenerator, cmFastbuildFileWriter& file,
+  cmMakefile* makefile, const std::vector<cmGeneratorTarget*>& targets,
+  const std::vector<cmFastbuildFileWriter::Compiler>& compilers)
+{
+  file.WriteSingleLineComment("Targets");
+
+  std::vector<cmFastbuildFileWriter::Target> fastbuildTargets;
+  std::vector<cmFastbuildFileWriter::Alias> fastbuildAliases;
+
+  CreateFastbuildTargets(globalGenerator, makefile, targets, compilers,
+                         fastbuildTargets, fastbuildAliases);
+
+  // TODO: Sort
+  // TODO: Resolve dependencies
+
+  // Write all targets
+  for (const auto& target : fastbuildTargets) {
+    file.WriteSingleLineComment("Target " + target.Name);
+
+    // Write pre-build events
+    for (const auto& element : target.GetPreBuildEvents()) {
+      file.Write(element);
+    }
+
+    // Write object lists
+    for (const auto& ol : target.GetObjectLists()) {
+      file.Write(ol);
+    }
+
+    // Write pre-link events
+    for (const auto& element : target.GetPreLinkEvents()) {
+      file.Write(element);
+    }
+
+    // Write library
+    if (target.HasLibrary) {
+      file.Write(target.GetLibrary());
+    }
+
+    // Write post-build events
+    for (const auto& element : target.GetPostBuildEvents()) {
+      file.Write(element);
+    }
+  }
+
+  // Write aliases
+  file.WriteSingleLineComment("Aliases");
+  for (const auto& alias : fastbuildAliases)
+    file.Write(alias);
+}
+
 cmGlobalFastbuildGenerator::cmGlobalFastbuildGenerator(cmake* cm)
   : cmGlobalCommonGenerator(cm)
 {
@@ -905,94 +992,6 @@ void cmGlobalFastbuildGenerator::GenerateBffFile()
     GenerateBffCompilerSection(file, root->GetMakefile(), targets);
   GenerateBffTargetSection(*this, file, root->GetMakefile(), targets,
                            compilers);
-}
-
-std::vector<cmFastbuildFileWriter::Compiler>
-cmGlobalFastbuildGenerator::GenerateBffCompilerSection(
-  cmFastbuildFileWriter& file, cmMakefile* makefile,
-  const std::vector<cmGeneratorTarget*>& targets) const
-{
-  std::vector<cmFastbuildFileWriter::Compiler> compilers;
-  file.WriteSingleLineComment("Compilers");
-
-  // Output compiler for each language
-  std::vector<std::string> compiler_languages;
-  for (const auto& language :
-       fastbuild::detail::DetectTargetLanguages(targets)) {
-    // Get the root location of the compiler
-    std::string variableString = "CMAKE_" + language + "_COMPILER";
-    std::string executable = makefile->GetSafeDefinition(variableString);
-    if (executable.empty()) {
-      continue;
-    }
-
-    // Remember language for later
-    compiler_languages.push_back(language);
-
-    // Output compiler definition
-    cmFastbuildFileWriter::Compiler compiler;
-    compiler.Executable = executable;
-    compiler.Name = "Compiler_" + language;
-    if (cmSystemTools::UpperCase(language) == "RC") {
-      compiler.CompilerFamily = "custom";
-    }
-    compilers.push_back(compiler);
-    file.Write(compiler);
-  }
-
-  return compilers;
-}
-
-void cmGlobalFastbuildGenerator::GenerateBffTargetSection(
-  cmGlobalGenerator& globalGenerator, cmFastbuildFileWriter& file,
-  cmMakefile* makefile, const std::vector<cmGeneratorTarget*>& targets,
-  const std::vector<cmFastbuildFileWriter::Compiler>& compilers) const
-{
-  file.WriteSingleLineComment("Targets");
-
-  std::vector<cmFastbuildFileWriter::Target> fastbuildTargets;
-  std::vector<cmFastbuildFileWriter::Alias> fastbuildAliases;
-
-  CreateFastbuildTargets(globalGenerator, makefile, targets, compilers,
-                         fastbuildTargets, fastbuildAliases);
-
-  // TODO: Sort
-  // TODO: Resolve dependencies
-
-  // Write all targets
-  for (const auto& target : fastbuildTargets) {
-    file.WriteSingleLineComment("Target " + target.Name);
-
-    // Write pre-build events
-    for (const auto& element : target.GetPreBuildEvents()) {
-      file.Write(element);
-    }
-
-    // Write object lists
-    for (const auto& ol : target.GetObjectLists()) {
-      file.Write(ol);
-    }
-
-    // Write pre-link events
-    for (const auto& element : target.GetPreLinkEvents()) {
-      file.Write(element);
-    }
-
-    // Write library
-    if (target.HasLibrary) {
-      file.Write(target.GetLibrary());
-    }
-
-    // Write post-build events
-    for (const auto& element : target.GetPostBuildEvents()) {
-      file.Write(element);
-    }
-  }
-
-  // Write aliases
-  file.WriteSingleLineComment("Aliases");
-  for (const auto& alias : fastbuildAliases)
-    file.Write(alias);
 }
 
 std::vector<cmGeneratorTarget*>
