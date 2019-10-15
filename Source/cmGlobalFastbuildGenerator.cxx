@@ -168,6 +168,7 @@ struct TargetOutputFileNames
     linkOutput; //!< Path to output of linker, i.e. .exe, .dll, .so, .lib file
   std::string linkOutputPdb;
   std::string linkOutputImplib;
+  std::string linkIntermediateDir;
 };
 
 TargetOutputFileNames ComputeTargetOutputFileNames(
@@ -180,6 +181,7 @@ TargetOutputFileNames ComputeTargetOutputFileNames(
   output.compileOutputDir = target.GetDirectory(config);
   output.compileOutputPdb = target.GetCompilePDBPath(config);
 
+  // Force PDB to be in a target-specific directory
   if (!output.compileOutputPdb.empty()) {
     output.compileOutputPdb =
       cmSystemTools::GetParentDirectory(output.compileOutputPdb) + "/" +
@@ -198,6 +200,13 @@ TargetOutputFileNames ComputeTargetOutputFileNames(
       target.GetPDBDirectory(config) + "/" + target.GetPDBName(config);
   }
 
+  // Set the linker's intermediate directory to a target/config-specific
+  // location. Intermediate manifest(s) will be written to this directory, and
+  // if it is not target/config-unique, then multiple processes can write to
+  // the same file leading to errors.
+  output.linkIntermediateDir =
+    output.compileOutputDir + "/" + target.GetName() + "_linkint";
+
   output.compileOutputDir =
     cmSystemTools::ConvertToOutputPath(output.compileOutputDir);
   output.compileOutputPdb =
@@ -207,6 +216,8 @@ TargetOutputFileNames ComputeTargetOutputFileNames(
     cmSystemTools::ConvertToOutputPath(output.linkOutputImplib);
   output.linkOutputPdb =
     cmSystemTools::ConvertToOutputPath(output.linkOutputPdb);
+  output.linkIntermediateDir =
+    cmSystemTools::ConvertToOutputPath(output.linkIntermediateDir);
 
   return output;
 }
@@ -318,7 +329,7 @@ void SetLinkerInvocation(cmFastbuildFileWriter::Library& library,
   vars.Language = language.c_str();
   vars.Manifests = manifests.c_str();
   vars.Objects = "\"%1\"";
-  vars.ObjectDir = targetOutputNames.compileOutputDir.c_str();
+  vars.ObjectDir = targetOutputNames.linkIntermediateDir.c_str();
   vars.LinkLibraries = linkLibs.c_str();
   vars.Target = "\"%2\"";
   vars.TargetSOName = "$TargetOutSO$";
@@ -622,6 +633,10 @@ void CreateFastbuildTargets(
           EnsureDirectoryExists(
             cmSystemTools::GetParentDirectory(targetOutputNames.linkOutput),
             makefile->GetHomeOutputDirectory());
+        }
+        if (!targetOutputNames.linkIntermediateDir.empty()) {
+          EnsureDirectoryExists(targetOutputNames.linkIntermediateDir,
+                                makefile->GetHomeOutputDirectory());
         }
 
         // Create one object list per language
