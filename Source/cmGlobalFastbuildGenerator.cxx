@@ -181,14 +181,6 @@ TargetOutputFileNames ComputeTargetOutputFileNames(
   output.compileOutputDir = target.GetDirectory(config);
   output.compileOutputPdb = target.GetCompilePDBPath(config);
 
-  // Force PDB to be in a target-specific directory
-  if (!output.compileOutputPdb.empty()) {
-    output.compileOutputPdb =
-      cmSystemTools::GetParentDirectory(output.compileOutputPdb) + "/" +
-      target.GetName() + "/" +
-      cmSystemTools::GetFilenameName(output.compileOutputPdb);
-  }
-
   output.linkOutput = target.GetFullPath(
     config, cmStateEnums::ArtifactType::RuntimeBinaryArtifact, true);
   output.linkOutputImplib = target.GetFullPath(
