@@ -53,6 +53,8 @@ public:
   cmLocalGenerator* CreateLocalGenerator(cmMakefile* makefile) override;
   void EnableLanguage(std::vector<std::string> const& lang, cmMakefile* mf,
                       bool optional) override;
+  std::string ExpandCFGIntDir(const std::string& str,
+                              const std::string& config) const override;
   void Generate() override;
   std::vector<GeneratedMakeCommand> GenerateBuildCommand(
     const std::string& makeProgram, const std::string& projectName,

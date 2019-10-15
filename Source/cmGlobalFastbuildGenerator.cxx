@@ -180,15 +180,6 @@ TargetOutputFileNames ComputeTargetOutputFileNames(
   output.compileOutputDir = target.GetDirectory(config);
   output.compileOutputPdb = target.GetCompilePDBPath(config);
 
-  // Forcefully append target name to compile output directories, to ensure we
-  // don't clash manifests when linking several executables that all require
-  // the same objects
-  //
-  // TODO: Find a nicer way
-  if (!output.compileOutputDir.empty()) {
-    output.compileOutputDir += "/" + target.GetName();
-  }
-
   if (!output.compileOutputPdb.empty()) {
     output.compileOutputPdb =
       cmSystemTools::GetParentDirectory(output.compileOutputPdb) + "/" +
@@ -709,10 +700,12 @@ void CreateFastbuildTargets(
         configAlias.Targets.push_back(fbAlias.Name);
     }
 
-    fastbuildAliases.push_back(configAlias);
+	if (!configAlias.Targets.empty())
+		fastbuildAliases.push_back(configAlias);
   }
 
-  fastbuildAliases.push_back(allAlias);
+  if (!allAlias.Targets.empty())
+	fastbuildAliases.push_back(allAlias);
 }
 
 std::vector<cmGeneratorTarget*> SortTargetsInDependencyOrder(
@@ -962,11 +955,17 @@ cmGlobalFastbuildGenerator::GenerateBuildCommand(
   return { command };
 }
 
+std::string cmGlobalFastbuildGenerator::ExpandCFGIntDir(
+  const std::string& str, const std::string& config) const
+{
+  auto tmp = str;
+  cmSystemTools::ReplaceString(tmp, GetCMakeCFGIntDir(), config);
+  return tmp;
+}
+
 const char* cmGlobalFastbuildGenerator::GetCMakeCFGIntDir() const
 {
-  // TODO
-  // return "FASTBUILD_CONFIG_INT_DIR";
-  return ".";
+  return "$Configuration$";
 }
 
 std::string cmGlobalFastbuildGenerator::ConvertToFastbuildPath(
