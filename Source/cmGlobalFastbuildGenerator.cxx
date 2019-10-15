@@ -220,9 +220,9 @@ TargetOutputFileNames ComputeTargetOutputFileNames(
   return output;
 }
 
-std::string GetCompilerFlags(
-  cmLocalCommonGenerator* lg, cmGeneratorTarget* gt,
-  const std::string& config, const std::string& language)
+std::string GetCompilerFlags(cmLocalCommonGenerator* lg, cmGeneratorTarget* gt,
+                             const std::string& config,
+                             const std::string& language)
 {
   std::string compileFlags = "";
   lg->AddLanguageFlags(compileFlags, gt, language, config);
@@ -257,9 +257,9 @@ std::string GetCompilerFlags(
   return compileFlags;
 }
 
-std::string GetCompileDefines(
-  cmLocalCommonGenerator* lg, cmGeneratorTarget* gt,
-  const std::string& config, const std::string& language)
+std::string GetCompileDefines(cmLocalCommonGenerator* lg,
+                              cmGeneratorTarget* gt, const std::string& config,
+                              const std::string& language)
 {
   std::set<std::string> defines;
 
@@ -777,7 +777,6 @@ std::vector<cmGeneratorTarget*> SortTargetsInDependencyOrder(
   return sortedTargets;
 }
 
-
 void GenerateAndWriteBff(cmGlobalGenerator& globalGenerator,
                          cmFastbuildFileWriter& file, cmMakefile* makefile,
                          const std::vector<cmGeneratorTarget*>& targets)
@@ -950,7 +949,7 @@ cmGlobalFastbuildGenerator::GenerateBuildCommand(
     targets.erase(it);
   }
 
-  if (targets.empty()) {
+  if (targets.empty() || (targets.size() == 1 && targets[0].empty())) {
     // If we don't have any targets to build, we'll build the config alias
     command.Add(config);
   } else {
@@ -966,7 +965,7 @@ cmGlobalFastbuildGenerator::GenerateBuildCommand(
 const char* cmGlobalFastbuildGenerator::GetCMakeCFGIntDir() const
 {
   // TODO
-  //return "FASTBUILD_CONFIG_INT_DIR";
+  // return "FASTBUILD_CONFIG_INT_DIR";
   return ".";
 }
 
