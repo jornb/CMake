@@ -973,6 +973,7 @@ static const struct CompileLanguageNode : public cmGeneratorExpressionNode
     std::string genName = gg->GetName();
     if (genName.find("Makefiles") == std::string::npos &&
         genName.find("Ninja") == std::string::npos &&
+        genName.find("Fastbuild") == std::string::npos &&
         genName.find("Visual Studio") == std::string::npos &&
         genName.find("Xcode") == std::string::npos &&
         genName.find("Watcom WMake") == std::string::npos) {
@@ -1019,6 +1020,7 @@ static const struct CompileLanguageAndIdNode : public cmGeneratorExpressionNode
     std::string genName = gg->GetName();
     if (genName.find("Makefiles") == std::string::npos &&
         genName.find("Ninja") == std::string::npos &&
+        genName.find("Fastbuild") == std::string::npos &&
         genName.find("Visual Studio") == std::string::npos &&
         genName.find("Xcode") == std::string::npos &&
         genName.find("Watcom WMake") == std::string::npos) {
