@@ -41,6 +41,9 @@ public:
 
     //! (optional) Force targets to be built before this
     std::vector<std::string> PreBuildDependencies;
+
+    //! (optional) Append extension instead of replacing it
+    bool CompilerOutputKeepBaseExtension = true;
   };
 
   //! See http://www.fastbuild.org/docs/functions/objectlist.html

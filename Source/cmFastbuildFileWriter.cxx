@@ -152,6 +152,8 @@ void cmFastbuildFileWriter::Write(const ObjectList& objectList)
   PushFunctionCall("ObjectList", objectList.Alias);
   WriteVariable("Compiler", objectList.Compiler);
   WriteVariable("CompilerOptions", objectList.CompilerOptions);
+  WriteVariable("CompilerOutputKeepBaseExtension",
+                objectList.CompilerOutputKeepBaseExtension);
 
   auto tmp = objectList.CompilerOutputPath;
   cmSystemTools::ConvertToOutputSlashes(tmp);
