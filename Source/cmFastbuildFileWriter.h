@@ -24,6 +24,8 @@ public:
     std::vector<std::string>
       ExtraFiles; //!< (optional) Additional files (usually dlls) required by
                   //!< the compiler.
+
+    std::string Language;
   };
 
   //! See http://www.fastbuild.org/docs/functions/objectlist.html

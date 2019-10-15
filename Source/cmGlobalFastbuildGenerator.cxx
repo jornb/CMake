@@ -431,11 +431,45 @@ void SetCompilerInvocation(
   objectList.CompilerOptions = split.second;
 }
 
+std::string CreateAndAppendCompiler(
+  const std::string& executable, const std::string& language,
+  std::vector<cmFastbuildFileWriter::Compiler>& compilers)
+{
+  // Insert new compiler
+  cmFastbuildFileWriter::Compiler compiler;
+  compiler.Name = "Compiler_" + language;
+  compiler.Executable = executable;
+  compiler.Language = language;
+
+  // Handle special case where there is more than one compiler with the same
+  // name (e.g. same language). This doesn't usually happen, but some projects
+  // use CMake trickery to get this to happen, e.g. when just a few targets are
+  // cross-compiled.
+  auto existingCompilersWithSameName =
+    std::count_if(std::begin(compilers), std::end(compilers),
+                  [&](const auto& c) { return compiler.Name == c.Name; });
+  if (existingCompilersWithSameName > 0) {
+    compiler.Name += "_" + std::to_string(existingCompilersWithSameName + 1);
+  }
+
+  // TODO: Collect ExtraFiles
+
+  // Fastbuild auto-detects supported C and C++ compilers. However, the RC
+  // compiler is not natively supported, so we need to explicitly state a
+  // custom family
+  if (cmSystemTools::UpperCase(language) == "RC") {
+    compiler.CompilerFamily = "custom";
+  }
+
+  compilers.push_back(compiler);
+  return compiler.Name;
+}
+
 void InitializeObjectList(
   cmFastbuildFileWriter::ObjectList& objectList, cmGeneratorTarget* target,
   const TargetOutputFileNames& targetOutputNames, const std::string& config,
   const ObjectListSourceFileCollection& sourceFileCollection,
-  const std::vector<cmFastbuildFileWriter::Compiler>& compilers)
+  std::vector<cmFastbuildFileWriter::Compiler>& compilers)
 {
   auto localCommonGenerator =
     static_cast<cmLocalCommonGenerator*>(target->LocalGenerator);
@@ -454,11 +488,20 @@ void InitializeObjectList(
     sourceFileCollection.compileFlags,
     GetManifests(target, sourceFileCollection.sourceFiles, config));
 
-  // Replace compiler invocation with link to compile section
-  for (const auto& compiler : compilers) {
-    if (objectList.Compiler == compiler.Executable) {
-      objectList.Compiler = compiler.Name;
-    }
+  // Find existing compiler
+  auto it = std::find_if(
+    std::begin(compilers), std::end(compilers), [&](const auto& compiler) {
+      return compiler.Language == sourceFileCollection.language &&
+        compiler.Executable == objectList.Compiler;
+    });
+
+  if (it != std::end(compilers)) {
+    // Found existing compiler, replace our executable with link to it
+    objectList.Compiler = it->Name;
+  } else {
+    // Replace our executable with link to new compiler
+    objectList.Compiler = CreateAndAppendCompiler(
+      objectList.Compiler, sourceFileCollection.language, compilers);
   }
 }
 
@@ -521,7 +564,7 @@ void InitializeCustomCommands(cmFastbuildFileWriter::Exec& exec,
 void CreateFastbuildTargets(
   cmGlobalGenerator& globalGenerator, cmMakefile* makefile,
   const std::vector<cmGeneratorTarget*>& targets,
-  const std::vector<cmFastbuildFileWriter::Compiler>& compilers,
+  std::vector<cmFastbuildFileWriter::Compiler>& compilers,
   std::vector<cmFastbuildFileWriter::Target>& fastbuildTargets,
   std::vector<cmFastbuildFileWriter::Alias>& fastbuildAliases)
 {
@@ -734,58 +777,26 @@ std::vector<cmGeneratorTarget*> SortTargetsInDependencyOrder(
   return sortedTargets;
 }
 
-std::vector<cmFastbuildFileWriter::Compiler> GenerateBffCompilerSection(
-  cmFastbuildFileWriter& file, cmMakefile* makefile,
-  const std::vector<cmGeneratorTarget*>& targets)
+
+void GenerateAndWriteBff(cmGlobalGenerator& globalGenerator,
+                         cmFastbuildFileWriter& file, cmMakefile* makefile,
+                         const std::vector<cmGeneratorTarget*>& targets)
 {
   std::vector<cmFastbuildFileWriter::Compiler> compilers;
-  file.WriteSingleLineComment("Compilers");
-
-  // Output compiler for each language
-  std::vector<std::string> compiler_languages;
-  for (const auto& language :
-       fastbuild::detail::DetectTargetLanguages(targets)) {
-    // Get the root location of the compiler
-    std::string variableString = "CMAKE_" + language + "_COMPILER";
-    std::string executable = makefile->GetSafeDefinition(variableString);
-    if (executable.empty()) {
-      continue;
-    }
-
-    // Remember language for later
-    compiler_languages.push_back(language);
-
-    // Output compiler definition
-    cmFastbuildFileWriter::Compiler compiler;
-    compiler.Executable = executable;
-    compiler.Name = "Compiler_" + language;
-    if (cmSystemTools::UpperCase(language) == "RC") {
-      compiler.CompilerFamily = "custom";
-    }
-    compilers.push_back(compiler);
-    file.Write(compiler);
-  }
-
-  return compilers;
-}
-
-void GenerateBffTargetSection(
-  cmGlobalGenerator& globalGenerator, cmFastbuildFileWriter& file,
-  cmMakefile* makefile, const std::vector<cmGeneratorTarget*>& targets,
-  const std::vector<cmFastbuildFileWriter::Compiler>& compilers)
-{
-  file.WriteSingleLineComment("Targets");
-
   std::vector<cmFastbuildFileWriter::Target> fastbuildTargets;
   std::vector<cmFastbuildFileWriter::Alias> fastbuildAliases;
 
   CreateFastbuildTargets(globalGenerator, makefile, targets, compilers,
                          fastbuildTargets, fastbuildAliases);
 
-  // TODO: Sort
-  // TODO: Resolve dependencies
+  // Write compilers
+  file.WriteSingleLineComment("Compilers");
+  for (const auto& compiler : compilers) {
+    file.Write(compiler);
+  }
 
   // Write all targets
+  file.WriteSingleLineComment("Targets");
   for (const auto& target : fastbuildTargets) {
     file.WriteSingleLineComment("Target " + target.Name);
 
@@ -971,9 +982,10 @@ void cmGlobalFastbuildGenerator::GenerateBffFile()
 {
   // Get the root local generator
   auto root = static_cast<cmLocalFastbuildGenerator*>(LocalGenerators[0]);
+  auto makeFile = root->GetMakefile();
 
   // Open bff file for writing
-  cmFastbuildFileWriter file{ root->GetMakefile()->GetHomeOutputDirectory() +
+  cmFastbuildFileWriter file{ makeFile->GetHomeOutputDirectory() +
                               "/fbuild.bff" };
 
   file.WriteSingleLineComment("This file was auto-generated by cmake.");
@@ -988,10 +1000,7 @@ void cmGlobalFastbuildGenerator::GenerateBffFile()
   // We therefore sort all targets based on their dependencies.
   targets = SortTargetsInDependencyOrder(*this, targets);
 
-  auto compilers =
-    GenerateBffCompilerSection(file, root->GetMakefile(), targets);
-  GenerateBffTargetSection(*this, file, root->GetMakefile(), targets,
-                           compilers);
+  GenerateAndWriteBff(*this, file, makeFile, targets);
 }
 
 std::vector<cmGeneratorTarget*>
