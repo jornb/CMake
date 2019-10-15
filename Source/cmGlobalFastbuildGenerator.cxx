@@ -869,10 +869,13 @@ void cmGlobalFastbuildGenerator::ComputeTargetObjectDirectory(
 {
   // Compute full path to object file directory for this target.
   // Note: Same implementation as
-  // cmGlobalNinjaGenerator::ComputeTargetObjectDirectory and others
+  // cmGlobalNinjaGenerator and others with the addition of GetCMakeCFGIntDir
+  // because we are using config-dependent object locations, similarly to
+  // visual studio
   gt->ObjectDirectory =
     cmStrCat(gt->LocalGenerator->GetCurrentBinaryDirectory(), '/',
-             gt->LocalGenerator->GetTargetDirectory(gt), '/');
+             gt->LocalGenerator->GetTargetDirectory(gt), '/',
+             this->GetCMakeCFGIntDir(), '/');
 }
 
 cmLinkLineComputer* cmGlobalFastbuildGenerator::CreateLinkLineComputer(
