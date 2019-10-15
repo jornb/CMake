@@ -20,6 +20,7 @@ public:
   {
     std::string Name;
     std::string Executable; //!< Primary compiler executable
+    std::string CompilerFamily;
     std::vector<std::string>
       ExtraFiles; //!< (optional) Additional files (usually dlls) required by
                   //!< the compiler.
@@ -151,13 +152,19 @@ public:
     void ComputeDummyOutputPaths(const std::string& root);
     void ComputeInternalDependencies();
 
+    //! \briefAdd a utility dependency between two targets. `this` depends on
+    //! `dependency`.
+    //! This method only updates the `PreBuildDependencies` fields to ensure
+    //! the build order is correct.
+    void AddUtilDependency(const Target& dependency);
+
     //! \briefAdd a dependency between two targets. `this` depends on
     //! `dependency`.
     //!
     //! Note that all dependencies between the libraries and object lists etc.
     //! have already been accounted for. This method only updates the
     //! `PreBuildDependencies` fields to ensure the build order is correct.
-    void AddDependency(const Target& dependency);
+    void AddLinkDependency(const Target& dependency);
 
     std::string Name;
     bool HasLibrary = false;

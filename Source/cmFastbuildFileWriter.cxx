@@ -134,6 +134,10 @@ void cmFastbuildFileWriter::Write(const Compiler& compiler)
   WriteVariable("CompilerRoot", compilerPath);
   WriteVariable("Executable", compilerFile);
 
+  if (!compiler.CompilerFamily.empty()) {
+    WriteVariable("CompilerFamily", compiler.CompilerFamily);
+  }
+
   // Write additional files
   if (!compiler.ExtraFiles.empty()) {
     file << currentIndent << ".ExtraFiles = ";
@@ -490,11 +494,22 @@ void cmFastbuildFileWriter::Target::ComputeInternalDependencies()
   // and nothing else
 }
 
-void cmFastbuildFileWriter::Target::AddDependency(const Target& dependency)
+void cmFastbuildFileWriter::Target::AddUtilDependency(const Target& dependency)
 {
-  // If we both have libraries, assume this is a link-level dependency.
-  // Note: We use .Libraries and not PreBuildDependencies so that Fastbuild
-  // will know to rebuild us when the dependency changes
+  // To set up the build order, we add the last executed alias from the
+  // dependency to our first executed alias. Note that we must handle the case
+  // where we depend on an alias set, e.g. multiple objectlists, and not just a
+  // single alias.
+  auto dependencies = GetLastExecutedDependencySet(dependency);
+  auto dependees = GetFirstExecutedPreBuildDependenciesSet(*this);
+  for (auto& dependee : dependees)
+    for (const auto& d : dependencies)
+      dependee->push_back(d);
+}
+
+void cmFastbuildFileWriter::Target::AddLinkDependency(const Target& dependency)
+{
+  // If we both have libraries, add the linker dependency
   if (HasLibrary && dependency.HasLibrary &&
       !dependency.Library.LinkerDependencyOuptut.empty()) {
 
@@ -522,15 +537,9 @@ void cmFastbuildFileWriter::Target::AddDependency(const Target& dependency)
   //
   // Because the build events could output or copy some files that we depend
   // on, we will assume the pessimistic/conservative approach of always waiting
-  // for all build events of the dependency
+  // for all build events of the dependency.
   //
-  // To do this, we add the last executed alias from the dependency to our
-  // first executed alias. Note that we must handle the case where we depend on
-  // an alias set, e.g. multiple objectlists, and not just a single alias.
-
-  auto dependencies = GetLastExecutedDependencySet(dependency);
-  auto dependees = GetFirstExecutedPreBuildDependenciesSet(*this);
-  for (auto& dependee : dependees)
-    for (const auto& d : dependencies)
-      dependee->push_back(d);
+  // Therefore, we add a "utility" dependency too, which just means that the
+  // build order will be set up correctly.
+  AddUtilDependency(dependency);
 }

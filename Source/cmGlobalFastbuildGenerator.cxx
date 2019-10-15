@@ -2,6 +2,7 @@
    file Copyright.txt or https://cmake.org/licensing for details.  */
 #include "cmGlobalFastbuildGenerator.h"
 
+#include <algorithm>
 #include <unordered_map>
 
 #include "cmCommonTargetGenerator.h"
@@ -16,6 +17,90 @@
 #include "cmSourceFile.h"
 #include "cmState.h"
 #include "cmake.h"
+
+//! Collection of source files for an object list with similar compile
+//! defines and flags
+struct ObjectListSourceFileCollection
+{
+  std::string language;
+  std::string compileDefines;
+  std::string compileFlags;
+  std::vector<const cmSourceFile*> sourceFiles;
+};
+
+std::vector<ObjectListSourceFileCollection> OrganizeObjectListSourceFiles(
+  cmGeneratorTarget& target, const std::string& config)
+{
+  auto localCommonGenerator =
+    static_cast<cmLocalCommonGenerator*>(target.LocalGenerator);
+  assert(localCommonGenerator);
+
+  std::vector<ObjectListSourceFileCollection> batches;
+
+  for (const auto& bt : target.GetSourceFiles(config)) {
+    auto sourceFile = bt.Value;
+
+    // Skip files wihtout an object output (e.g. header files)
+    if (target.GetObjectName(sourceFile).empty())
+      continue;
+
+    auto language = sourceFile->GetLanguage();
+    auto CONFIG = cmSystemTools::UpperCase(config);
+
+    // Calcualte defines
+    std::set<std::string> compileDefinesSet;
+    auto appendDefines = [&](const std::string& propertyName) {
+      auto values = sourceFile->GetProperty(propertyName);
+      if (!values)
+        return;
+
+      localCommonGenerator->AppendDefines(compileDefinesSet, values);
+    };
+    appendDefines("COMPILE_DEFINITIONS");
+    appendDefines("COMPILE_DEFINITIONS_" + CONFIG);
+    std::string compileDefines;
+    localCommonGenerator->JoinDefines(compileDefinesSet, compileDefines,
+                                      language);
+
+    // Calculate flags
+    std::string compileFlags;
+    auto appendflags = [&](const std::string& propertyName) {
+      auto values = sourceFile->GetProperty(propertyName);
+      if (!values)
+        return;
+
+      localCommonGenerator->AppendFlags(compileFlags, values);
+    };
+    appendflags("COMPILE_FLAGS");
+    appendflags("COMPILE_FLAGS_" + CONFIG);
+    appendflags("COMPILE_OPTIONS");
+    appendflags("COMPILE_OPTIONS_" + CONFIG);
+
+    // Look for an existing batch with the same compile defines and flags
+    auto it = std::find_if(std::begin(batches), std::end(batches),
+                           [&](const auto& batch) {
+                             return batch.language == language &&
+                               batch.compileDefines == compileDefines &&
+                               batch.compileFlags == compileFlags;
+                           });
+
+    if (it != std::end(batches)) {
+      // Reuse existing batch
+      it->sourceFiles.push_back(sourceFile);
+    } else {
+      // Insert new batch
+      batches.push_back(ObjectListSourceFileCollection{
+        language, compileDefines, compileFlags, { sourceFile } });
+    }
+  }
+
+  // Sort by language (for convenience)
+  std::sort(
+    std::begin(batches), std::end(batches),
+    [](const auto& a, const auto& b) { return a.language < b.language; });
+
+  return batches;
+}
 
 void EnsureDirectoryExists(const std::string& path,
                            const std::string& homeOutputDirectory)
@@ -137,7 +222,6 @@ TargetOutputFileNames ComputeTargetOutputFileNames(
 
 std::string GetCompilerFlags(
   cmLocalCommonGenerator* lg, cmGeneratorTarget* gt,
-  const std::vector<const cmSourceFile*>& sourceFiles,
   const std::string& config, const std::string& language)
 {
   std::string compileFlags = "";
@@ -170,19 +254,11 @@ std::string GetCompilerFlags(
   // FIXME const cast are evil
   lg->AddCompileOptions(compileFlags, gt, language, config);
 
-  for (const auto source : sourceFiles) {
-    auto sourceFlags = source->GetProperty("COMPILE_FLAGS");
-    if (sourceFlags) {
-      lg->AppendFlags(compileFlags, source->GetProperty("COMPILE_FLAGS"));
-    }
-  }
-
   return compileFlags;
 }
 
 std::string GetCompileDefines(
   cmLocalCommonGenerator* lg, cmGeneratorTarget* gt,
-  const std::vector<const cmSourceFile*>& sourceFiles,
   const std::string& config, const std::string& language)
 {
   std::set<std::string> defines;
@@ -196,18 +272,6 @@ std::string GetCompileDefines(
   // Add preprocessor definitions for this target and configuration.
   lg->GetTargetDefines(gt, config, language, defines);
 
-  // Add compile definitions set on individual source files
-  for (const auto source : sourceFiles) {
-    auto compileDefinitions = source->GetProperty("COMPILE_DEFINITIONS");
-    if (compileDefinitions)
-      lg->AppendDefines(defines, compileDefinitions);
-
-    compileDefinitions = source->GetProperty("COMPILE_DEFINITIONS_" +
-                                             cmSystemTools::UpperCase(config));
-    if (compileDefinitions)
-      lg->AppendDefines(defines, compileDefinitions);
-  }
-
   // Add a definition for the configuration name.
   lg->AppendDefines(defines, "CMAKE_INTDIR=\"" + config + "\"");
 
@@ -215,70 +279,6 @@ std::string GetCompileDefines(
   lg->JoinDefines(defines, definesString, language);
 
   return definesString;
-}
-
-std::string GetCompileArguments(
-  cmGeneratorTarget* target,
-  const std::vector<const cmSourceFile*>& sourceFiles,
-  const TargetOutputFileNames& outputNames, const std::string& manifests,
-  const std::string& language, const std::string& config)
-{
-  auto localCommonGenerator =
-    static_cast<cmLocalCommonGenerator*>(target->LocalGenerator);
-
-  const auto& targetName = target->GetName();
-  const auto targetTypeStr = cmState::GetTargetTypeName(target->GetType());
-
-  auto defines = GetCompileDefines(localCommonGenerator, target, sourceFiles,
-                                   config, language);
-  auto flags = GetCompilerFlags(localCommonGenerator, target, sourceFiles,
-                                config, language);
-
-  cmRulePlaceholderExpander::RuleVariables vars;
-  vars.CMTargetName = targetName.c_str();
-  vars.CMTargetType = targetTypeStr;
-  vars.Language = language.c_str();
-  vars.Source = "\"%1\"";
-  vars.Object = "\"%2\"";
-  vars.ObjectDir = outputNames.compileOutputDir.c_str();
-  vars.ObjectFileDir = "";
-  vars.Flags = flags.c_str();
-  vars.Includes = "";
-  vars.Manifests = manifests.c_str();
-  vars.Defines = defines.c_str();
-  vars.TargetCompilePDB = outputNames.compileOutputPdb.c_str();
-
-  // Get all commands necessary to compile objects
-  std::string compileCmdVariable =
-    localCommonGenerator->GetMakefile()->GetRequiredDefinition(
-      "CMAKE_" + language + "_COMPILE_OBJECT");
-  std::vector<std::string> compileCmds;
-  cmExpandList(compileCmdVariable, compileCmds);
-
-  // We don't know how to handle more than one command.
-  // We expect a single command which starts with the CMAKE_CXX_COMPILER.
-  if (compileCmds.size() != 1 ||
-      compileCmds[0].rfind("<CMAKE_CXX_COMPILER> ", 0) == std::string::npos)
-    throw std::runtime_error(
-      "Internal CMake error: Fastbuild expected a single command for object "
-      "compilation starting with <CMAKE_CXX_COMPILER>");
-
-  // Split the <CMAKE_CXX_COMPILER> off the command
-  auto compileCommand =
-    compileCmds[0].substr(std::string("<CMAKE_CXX_COMPILER> ").length());
-
-  // Create rule expander in a unique_ptr so it is ensured to be cleaned up
-  auto localFastbuildGenerator =
-    static_cast<cmLocalFastbuildGenerator*>(localCommonGenerator);
-  std::unique_ptr<cmRulePlaceholderExpander> rulePlaceholderExpander{
-    localFastbuildGenerator->CreateRulePlaceholderExpander()
-  };
-
-  // Expand the compile command
-  rulePlaceholderExpander->ExpandRuleVariables(localFastbuildGenerator,
-                                               compileCommand, vars);
-
-  return compileCommand;
 }
 
 void SetLinkerInvocation(cmFastbuildFileWriter::Library& library,
@@ -368,12 +368,11 @@ void SetLinkerInvocation(cmFastbuildFileWriter::Library& library,
   library.LinkerOptions = split.second;
 }
 
-void SetCompilerInvocation(cmFastbuildFileWriter::ObjectList& objectList,
-                           cmGeneratorTarget* target,
-                           const TargetOutputFileNames& outputNames,
-                           const std::string& config,
-                           const std::string& language,
-                           std::vector<const cmSourceFile*>& sourceFiles)
+void SetCompilerInvocation(
+  cmFastbuildFileWriter::ObjectList& objectList, cmGeneratorTarget* target,
+  const TargetOutputFileNames& outputNames, const std::string& config,
+  const std::string& language, const std::string& sourceSpecificDefines,
+  const std::string& sourceSpecificFlags, const std::string& manifests)
 {
   auto localCommonGenerator =
     static_cast<cmLocalCommonGenerator*>(target->LocalGenerator);
@@ -381,12 +380,12 @@ void SetCompilerInvocation(cmFastbuildFileWriter::ObjectList& objectList,
   const auto& targetName = target->GetName();
   const auto targetTypeStr = cmState::GetTargetTypeName(target->GetType());
 
-  auto defines = GetCompileDefines(localCommonGenerator, target, sourceFiles,
-                                   config, language);
-  auto flags = GetCompilerFlags(localCommonGenerator, target, sourceFiles,
-                                config, language);
-
-  std::string manifests = GetManifests(target, sourceFiles, config);
+  auto defines =
+    GetCompileDefines(localCommonGenerator, target, config, language) + " " +
+    sourceSpecificDefines;
+  auto flags =
+    GetCompilerFlags(localCommonGenerator, target, config, language) + " " +
+    sourceSpecificFlags;
 
   cmRulePlaceholderExpander::RuleVariables vars;
   vars.CMTargetName = targetName.c_str();
@@ -432,28 +431,35 @@ void SetCompilerInvocation(cmFastbuildFileWriter::ObjectList& objectList,
   objectList.CompilerOptions = split.second;
 }
 
-void InitializeObjectList(cmFastbuildFileWriter::ObjectList& objectList,
-                          cmGeneratorTarget* target,
-                          const TargetOutputFileNames& targetOutputNames,
-                          const std::string& config,
-                          const std::string& language)
+void InitializeObjectList(
+  cmFastbuildFileWriter::ObjectList& objectList, cmGeneratorTarget* target,
+  const TargetOutputFileNames& targetOutputNames, const std::string& config,
+  const ObjectListSourceFileCollection& sourceFileCollection,
+  const std::vector<cmFastbuildFileWriter::Compiler>& compilers)
 {
   auto localCommonGenerator =
     static_cast<cmLocalCommonGenerator*>(target->LocalGenerator);
 
   // Collect all source files of this language
-  std::vector<const cmSourceFile*> languageSourceFiles;
-  std::vector<std::string> sourceFiles;
-  for (const auto& sourceFile : target->GetSourceFiles(config)) {
-    if (sourceFile.Value->GetLanguage() == language)
-      languageSourceFiles.push_back(sourceFile.Value);
-    sourceFiles.push_back(sourceFile.Value->GetLocation().GetFullPath());
+  std::vector<std::string> sourceFileNames;
+  for (const auto& sourceFile : sourceFileCollection.sourceFiles) {
+    sourceFileNames.push_back(sourceFile->GetLocation().GetFullPath());
   }
 
   objectList.CompilerOutputPath = target->GetSupportDirectory() + "/" + config;
-  objectList.CompilerInputFiles = sourceFiles;
-  SetCompilerInvocation(objectList, target, targetOutputNames, config,
-                        language, languageSourceFiles);
+  objectList.CompilerInputFiles = sourceFileNames;
+  SetCompilerInvocation(
+    objectList, target, targetOutputNames, config,
+    sourceFileCollection.language, sourceFileCollection.compileDefines,
+    sourceFileCollection.compileFlags,
+    GetManifests(target, sourceFileCollection.sourceFiles, config));
+
+  // Replace compiler invocation with link to compile section
+  for (const auto& compiler : compilers) {
+    if (objectList.Compiler == compiler.Executable) {
+      objectList.Compiler = compiler.Name;
+    }
+  }
 }
 
 void InitializeLibrary(cmFastbuildFileWriter::Library& library,
@@ -515,6 +521,7 @@ void InitializeCustomCommands(cmFastbuildFileWriter::Exec& exec,
 void CreateFastbuildTargets(
   cmGlobalGenerator& globalGenerator, cmMakefile* makefile,
   const std::vector<cmGeneratorTarget*>& targets,
+  const std::vector<cmFastbuildFileWriter::Compiler>& compilers,
   std::vector<cmFastbuildFileWriter::Target>& fastbuildTargets,
   std::vector<cmFastbuildFileWriter::Alias>& fastbuildAliases)
 {
@@ -541,6 +548,10 @@ void CreateFastbuildTargets(
 
     for (const auto& target : targets) {
       auto targetType = target->GetType();
+
+      if (target->GetName() == "CMakeLib") {
+        int a = 3;
+      }
 
       // Initialize target
       cmFastbuildFileWriter::Target fbTarget{ target->GetName() + "_" +
@@ -579,14 +590,11 @@ void CreateFastbuildTargets(
             makefile->GetHomeOutputDirectory());
         }
 
-        // Get all languages (e.g. CXX and or C) in target
-        auto languages = fastbuild::detail::DetectTargetLanguages({ target });
-
         // Create one object list per language
-        for (const auto& language : languages) {
-
+        for (const auto& batch :
+             OrganizeObjectListSourceFiles(*target, config)) {
           InitializeObjectList(fbTarget.MakeObjectList(), target,
-                               targetOutputNames, config, language);
+                               targetOutputNames, config, batch, compilers);
         }
 
         // Add library
@@ -620,23 +628,37 @@ void CreateFastbuildTargets(
       fbTarget.ComputeDummyOutputPaths(makefile->GetHomeOutputDirectory());
       fbTarget.ComputeInternalDependencies();
 
+      // Make alias
+      auto fbAlias = fbTarget.MakeAlias();
+      if (fbAlias.Targets.empty()) {
+        // Fasbuild does not allow empty aliases. If there is nothing to do,
+        // skip the target completely
+        continue;
+      } else {
+        fastbuildAliases.push_back(fbAlias);
+      }
+
       // Add dependencies between all targets of this configuration
       // Note: It is safe to do this here, because the input targets are in
       // dependency order, i.e. we will never depend on a target which we have
       // not yet seen/processed.
-      for (const cmGeneratorTarget* d :
-           globalGenerator.GetTargetDirectDepends(target)) {
+      for (const auto& dep : globalGenerator.GetTargetDirectDepends(target)) {
+        const cmGeneratorTarget* d = dep;
 
-        if (targetMap.count(d) > 0) {
-          fbTarget.AddDependency(fastbuildTargets[targetMap[d]]);
+        if (targetMap.count(d) == 0)
+          continue;
+
+        const auto& dependentFastbuildTarget = fastbuildTargets[targetMap[d]];
+
+        if (dep.IsLink()) {
+          fbTarget.AddLinkDependency(dependentFastbuildTarget);
+        } else {
+          fbTarget.AddUtilDependency(dependentFastbuildTarget);
         }
       }
 
       fastbuildTargets.push_back(fbTarget);
       targetMap[target] = fastbuildTargets.size() - 1;
-
-      auto fbAlias = fbTarget.MakeAlias();
-      fastbuildAliases.push_back(fbAlias);
 
       // Add all targets, except global ones (e.g. install/run_tests), which
       // have to be run explicitly
@@ -879,14 +901,18 @@ void cmGlobalFastbuildGenerator::GenerateBffFile()
   // We therefore sort all targets based on their dependencies.
   targets = SortTargetsInDependencyOrder(*this, targets);
 
-  GenerateBffCompilerSection(file, root->GetMakefile(), targets);
-  GenerateBffTargetSection(*this, file, root->GetMakefile(), targets);
+  auto compilers =
+    GenerateBffCompilerSection(file, root->GetMakefile(), targets);
+  GenerateBffTargetSection(*this, file, root->GetMakefile(), targets,
+                           compilers);
 }
 
-void cmGlobalFastbuildGenerator::GenerateBffCompilerSection(
+std::vector<cmFastbuildFileWriter::Compiler>
+cmGlobalFastbuildGenerator::GenerateBffCompilerSection(
   cmFastbuildFileWriter& file, cmMakefile* makefile,
   const std::vector<cmGeneratorTarget*>& targets) const
 {
+  std::vector<cmFastbuildFileWriter::Compiler> compilers;
   file.WriteSingleLineComment("Compilers");
 
   // Output compiler for each language
@@ -907,21 +933,28 @@ void cmGlobalFastbuildGenerator::GenerateBffCompilerSection(
     cmFastbuildFileWriter::Compiler compiler;
     compiler.Executable = executable;
     compiler.Name = "Compiler_" + language;
+    if (cmSystemTools::UpperCase(language) == "RC") {
+      compiler.CompilerFamily = "custom";
+    }
+    compilers.push_back(compiler);
     file.Write(compiler);
   }
+
+  return compilers;
 }
 
 void cmGlobalFastbuildGenerator::GenerateBffTargetSection(
   cmGlobalGenerator& globalGenerator, cmFastbuildFileWriter& file,
-  cmMakefile* makefile, const std::vector<cmGeneratorTarget*>& targets) const
+  cmMakefile* makefile, const std::vector<cmGeneratorTarget*>& targets,
+  const std::vector<cmFastbuildFileWriter::Compiler>& compilers) const
 {
   file.WriteSingleLineComment("Targets");
 
   std::vector<cmFastbuildFileWriter::Target> fastbuildTargets;
   std::vector<cmFastbuildFileWriter::Alias> fastbuildAliases;
 
-  CreateFastbuildTargets(globalGenerator, makefile, targets, fastbuildTargets,
-                         fastbuildAliases);
+  CreateFastbuildTargets(globalGenerator, makefile, targets, compilers,
+                         fastbuildTargets, fastbuildAliases);
 
   // TODO: Sort
   // TODO: Resolve dependencies
