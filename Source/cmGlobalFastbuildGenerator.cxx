@@ -538,6 +538,9 @@ void InitializeLibrary(cmFastbuildFileWriter::Library& library,
       library.Type = "DLL";
       library.LinkerDependencyOuptut = targetOutputNames.linkOutputImplib;
       break;
+    case cmStateEnums::MODULE_LIBRARY:
+      library.Type = "DLL";
+      break;
   }
 
   // Build link invocation arguments
@@ -639,7 +642,7 @@ void CreateFastbuildTargets(
         }
 
         // Add library
-        if (targetType <= cmStateEnums::SHARED_LIBRARY) {
+        if (targetType <= cmStateEnums::MODULE_LIBRARY) {
           InitializeLibrary(fbTarget.MakeLibrary(), target, targetOutputNames,
                             config);
         }
