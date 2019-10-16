@@ -70,14 +70,20 @@ public:
     //! (optional) Arguments to pass to executable
     std::vector<std::string> ExecArguments;
 
-	//! (optional) Write the standard output from the executable to the output file
-	bool ExecUseStdOutAsOutput = false;
+    //! (optional) Write the standard output from the executable to the output
+    //! file
+    bool ExecUseStdOutAsOutput = false;
 
-	//! (optional) Run the executable even if inputs have not changed
-	bool ExecAlways = false;
+    //! (optional) Run the executable even if inputs have not changed
+    bool ExecAlways = false;
 
     //! (optional) Force targets to be built before this
     std::vector<std::string> PreBuildDependencies;
+
+    //! Create a no-operation target. Note that all fastbuild Execs must have a
+    //! well-defined output file, even if it is not used. This file will be put
+    //! in the given directory.
+    static Exec Noop(const std::string& outputDir);
   };
 
   //! See http://www.fastbuild.org/docs/functions/executable.html and http://www.fastbuild.org/docs/functions/dll.html

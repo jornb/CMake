@@ -9,7 +9,7 @@
 #ifdef _WIN32
 void cmFastbuildFileWriter::GenerateBuildScript(
   const std::string& filePrefix, cmFastbuildFileWriter::Exec& exec,
-  const cmCustomCommand& command, const std::string &args_replace)
+  const cmCustomCommand& command, const std::string& args_replace)
 {
   auto filename = filePrefix + ".bat";
 
@@ -46,6 +46,24 @@ void cmFastbuildFileWriter::GenerateBuildScript(
   exec.ExecExecutable = cmSystemTools::FindProgram("cmd.exe");
   exec.ExecArguments.push_back("/C");
   exec.ExecArguments.push_back(filename);
+}
+#else
+// TODO
+#endif
+
+#ifdef _WIN32
+cmFastbuildFileWriter::Exec cmFastbuildFileWriter::Exec::Noop(
+  const std::string& outputDir)
+{
+  // Setup exec
+  cmFastbuildFileWriter::Exec exec;
+  exec.Name = "__fastbuild_noop";
+  exec.ExecExecutable = cmSystemTools::FindProgram("cmd.exe");
+  exec.ExecArguments.push_back("/C");
+  exec.ExecOutput = outputDir + "/__fastbuild_noop.txt";
+  exec.ExecAlways = false;
+  exec.ExecUseStdOutAsOutput = true;
+  return exec;
 }
 #else
 // TODO
@@ -175,7 +193,14 @@ void cmFastbuildFileWriter::Write(const Alias& alias)
 {
   PushFunctionCall("Alias", alias.Name);
   file << currentIndent << ".Targets  = ";
-  WriteArray(alias.Targets);
+
+  // Fastbuild does not support empty aliases. Therefore, write a noop target
+  // instead.
+  if (alias.Targets.empty()) {
+    WriteArray({ "__fastbuild_noop" });
+  } else {
+    WriteArray(alias.Targets);
+  }
   PopFunctionCall();
 }
 
@@ -402,7 +427,7 @@ void cmFastbuildFileWriter::Target::ComputeDummyOutputPaths(
       if (element.ExecOutput.empty()) {
         element.ExecOutput = root + "/" + element.Name + ".txt";
         element.ExecUseStdOutAsOutput = true;
-        //element.ExecAlways = true;
+        // element.ExecAlways = true;
       }
     }
   };

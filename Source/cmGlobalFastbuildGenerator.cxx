@@ -556,7 +556,7 @@ void InitializeCustomCommands(cmFastbuildFileWriter::Exec& exec,
 }
 
 void CreateFastbuildTargets(
-  cmGlobalGenerator& globalGenerator, cmMakefile* makefile,
+  cmGlobalFastbuildGenerator& globalGenerator, cmMakefile* makefile,
   const std::vector<cmGeneratorTarget*>& targets,
   std::vector<cmFastbuildFileWriter::Compiler>& compilers,
   std::vector<cmFastbuildFileWriter::Target>& fastbuildTargets,
@@ -703,16 +703,15 @@ void CreateFastbuildTargets(
 
       // Add all targets, except global ones (e.g. install/run_tests), which
       // have to be run explicitly
-      if (targetType != cmStateEnums::GLOBAL_TARGET)
+      if (targetType != cmStateEnums::GLOBAL_TARGET &&
+          !target->GetPropertyAsBool("EXCLUDE_FROM_ALL"))
         configAlias.Targets.push_back(fbAlias.Name);
     }
 
-	if (!configAlias.Targets.empty())
-		fastbuildAliases.push_back(configAlias);
+    fastbuildAliases.push_back(configAlias);
   }
 
-  if (!allAlias.Targets.empty())
-	fastbuildAliases.push_back(allAlias);
+  fastbuildAliases.push_back(allAlias);
 }
 
 std::vector<cmGeneratorTarget*> SortTargetsInDependencyOrder(
@@ -777,7 +776,7 @@ std::vector<cmGeneratorTarget*> SortTargetsInDependencyOrder(
   return sortedTargets;
 }
 
-void GenerateAndWriteBff(cmGlobalGenerator& globalGenerator,
+void GenerateAndWriteBff(cmGlobalFastbuildGenerator& globalGenerator,
                          cmFastbuildFileWriter& file, cmMakefile* makefile,
                          const std::vector<cmGeneratorTarget*>& targets)
 {
@@ -827,6 +826,21 @@ void GenerateAndWriteBff(cmGlobalGenerator& globalGenerator,
 
   // Write aliases
   file.WriteSingleLineComment("Aliases");
+
+  // Fastbuild does not support empty targets. Therefore, write a noop target
+  // for empty targets to use instead.
+  //
+  // Only do this if there are any empty targets at all - to keep the buildfile
+  // nice and simple
+  auto it =
+    std::find_if(std::begin(fastbuildAliases), std::end(fastbuildAliases),
+                 [](const auto& alias) { return alias.Targets.empty(); });
+  if (it != std::end(fastbuildAliases)) {
+    file.Write(
+      cmFastbuildFileWriter::Exec::Noop(makefile->GetHomeOutputDirectory()));
+  }
+
+  // Write actual aliases. Will implicitly use noop target for empty targets.
   for (const auto& alias : fastbuildAliases)
     file.Write(alias);
 }
